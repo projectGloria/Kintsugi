@@ -1,8 +1,32 @@
-# [GitHub Desktop](https://desktop.github.com)
+<div align="center">
 
-[GitHub Desktop](https://desktop.github.com/) is an open-source [Electron](https://www.electronjs.org/)-based
-GitHub app. It is written in [TypeScript](https://www.typescriptlang.org) and
-uses [React](https://reactjs.org/).
+<img src="app/static/kintsugi/kintsugi-icon.png" alt="Kintsugi Logo" width="120" height="120" />
+
+# Kintsugi
+
+**A refined, personal Git desktop client crafted for Windows**
+
+*Embracing history, branching, and repair — powered by Electron, TypeScript, and React.*
+
+<p>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-00B074.svg?style=flat-square" alt="License: MIT" /></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%20x64-0078D4.svg?style=flat-square&logo=windows" alt="Platform: Windows x64" />
+  <img src="https://img.shields.io/badge/Electron-Desktop-47848F.svg?style=flat-square&logo=electron" alt="Electron" />
+  <img src="https://img.shields.io/badge/React-18-61DAFB.svg?style=flat-square&logo=react" alt="React" />
+  <img src="https://img.shields.io/badge/Telemetry-Disabled-success.svg?style=flat-square" alt="Telemetry Disabled" />
+</p>
+
+---
+
+<p>
+  <a href="#-about-kintsugi">About</a> •
+  <a href="#-key-features">Features</a> •
+  <a href="#-visual-tour">Visual Tour</a> •
+  <a href="#-installation">Installation</a> •
+  <a href="#-building-from-source">Building</a> •
+  <a href="#-icon--design-philosophy">Design</a> •
+  <a href="#-license--credits">License</a>
+</p>
 
 <picture>
   <source
@@ -10,101 +34,177 @@ uses [React](https://reactjs.org/).
     media="(prefers-color-scheme: dark)"
   />
   <img
-    width="1072"
+    width="900"
     src="https://user-images.githubusercontent.com/634063/202742985-bb3b3b94-8aca-404a-8d8a-fd6a6f030672.png"
-    alt="A screenshot of the GitHub Desktop application showing changes being viewed and committed with two attributed co-authors"
+    alt="Kintsugi Git Client Interface Preview"
   />
 </picture>
 
-## Where can I get it?
+</div>
 
-Download the official installer for your operating system:
+---
 
- - [macOS](https://central.github.com/deployments/desktop/desktop/latest/darwin)
- - [macOS (Apple silicon)](https://central.github.com/deployments/desktop/desktop/latest/darwin-arm64)
- - [Windows](https://central.github.com/deployments/desktop/desktop/latest/win32)
- - [Windows machine-wide install](https://central.github.com/deployments/desktop/desktop/latest/win32?format=msi)
+## 🍵 About Kintsugi
 
-Linux is not officially supported; however, you can find installers created for Linux from a fork of GitHub Desktop in the [Community Releases](https://github.com/desktop/desktop#community-releases) section.
+**Kintsugi** (金継ぎ, *"golden joinery"*) is the traditional Japanese art of mending broken pottery with lacquer dusted in powdered gold, silver, or platinum. Rather than disguising wear and fissures, Kintsugi illuminates them — making the piece stronger and more unique through its history.
 
-### Beta Channel
+In software development and version control, our branches, merges, rebases, and resolved conflicts are our golden seams. 
 
-Want to test out new features and get fixes before everyone else? Install the
-beta channel to get access to early builds of Desktop:
+**Kintsugi** is a standalone, customized Windows x64 build of GitHub Desktop designed for developers seeking a focused, privacy-conscious, and self-contained Git workflow:
 
- - [macOS](https://central.github.com/deployments/desktop/desktop/latest/darwin?env=beta)
- - [macOS (Apple silicon)](https://central.github.com/deployments/desktop/desktop/latest/darwin-arm64?env=beta)
- - [Windows](https://central.github.com/deployments/desktop/desktop/latest/win32?env=beta)
- - [Windows (ARM64)](https://central.github.com/deployments/desktop/desktop/latest/win32-arm64?env=beta)
+- 🪟 **Independent Windows Application**: Uses its own identity, application name, executable (`Kintsugi.exe`), Windows shortcut icons, and isolated application data directory (`%APPDATA%\Kintsugi`).
+- 🛡️ **Privacy & Autonomy**: Upstream usage reporting, telemetry pings (`central.github.com`), and automatic background update checks are removed or deactivated.
+- 💻 **Offline & Local-First**: Work with any local Git repository immediately—no sign-in or remote account required.
+- 🤝 **Seamless Cloud Compatibility**: Supports GitHub authentication whenever you wish to push, pull, or manage pull requests on remote repositories.
 
-The release notes for the latest beta versions are available [here](https://desktop.github.com/release-notes/?env=beta).
+---
 
-### Past Releases
-You can find past releases at https://desktop.githubusercontent.com. After installation of a past version, the auto update functionality will attempt to download the latest version. 
+## ✨ Key Features
 
-### Community Releases
+<table>
+  <tr>
+    <td width="50%">
+      <h3>🔍 Visual Diffing &amp; Staging</h3>
+      <p>Inspect code diffs with syntax highlighting, stage individual hunks or entire files, and craft granular, meaningful commits.</p>
+    </td>
+    <td width="50%">
+      <h3>🌿 Intuitive Branch History</h3>
+      <p>Switch, create, rename, and merge branches effortlessly with clear visualization of your project's commit tree.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>🍒 Interactive Cherry-Picking</h3>
+      <p>Drag, drop, and cherry-pick specific commits across branches with intuitive conflict resolution helpers.</p>
+    </td>
+    <td width="50%">
+      <h3>⚡ Command-Line Integration</h3>
+      <p>Launch directly from PowerShell, Windows Terminal, or CMD using the lightweight <code>kintsugi</code> CLI tool.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>👥 Co-Authorship Made Simple</h3>
+      <p>Easily attribute contributions and pair-programming sessions with automatic GitHub co-author suggestions.</p>
+    </td>
+    <td width="50%">
+      <h3>🎨 Custom Japanese Kintsugi Aesthetic</h3>
+      <p>Bespoke obsidian disc and gold seam branding, Windows installer splash art, and polished dark/light themes.</p>
+    </td>
+  </tr>
+</table>
 
-There are several community-supported package managers that can be used to
-install GitHub Desktop:
- - Windows users can install using [winget](https://docs.microsoft.com/en-us/windows/package-manager/winget/) `c:\> winget install github-desktop` or [Chocolatey](https://chocolatey.org/) `c:\> choco install github-desktop`
- - macOS users can install using [Homebrew](https://brew.sh/) package manager:
-      `$ brew install --cask github`
+---
 
-Installers for various Linux distributions can be found on the
-[`shiftkey/desktop`](https://github.com/shiftkey/desktop) fork.
+## 📸 Visual Tour
 
-## Is GitHub Desktop right for me? What are the primary areas of focus?
+### 1. Interactive Branch &amp; Commit Management
+Easily track branch states, undo changes, and recover unreachable or amended commits through an intuitive timeline.
 
-[This document](https://github.com/desktop/desktop/blob/development/docs/process/what-is-desktop.md) describes the focus of GitHub Desktop and who the product is most useful for.
+<p align="center">
+  <img src="docs/assets/unreachable-commits-demo.gif" alt="Branch and commit recovery demonstration" width="780" />
+</p>
 
-## I have a problem with GitHub Desktop
+### 2. Streamlined Cherry-Picking
+Port changes cleanly across branches without touching messy command-line flags.
 
-Note: The [GitHub Desktop Code of Conduct](https://github.com/desktop/desktop/blob/development/CODE_OF_CONDUCT.md) applies in all interactions relating to the GitHub Desktop project.
+<p align="center">
+  <img src="app/static/common/cherry-pick-intro.png" alt="Cherry-pick intro workflow" width="560" />
+</p>
 
-First, please search the [open issues](https://github.com/desktop/desktop/issues?q=is%3Aopen)
-and [closed issues](https://github.com/desktop/desktop/issues?q=is%3Aclosed)
-to see if your issue hasn't already been reported (it may also be fixed).
+### 3. Dedicated Installer Experience
+Custom installer branding and splash screen built specifically for Kintsugi on Windows.
 
-There is also a list of [known issues](https://github.com/desktop/desktop/blob/development/docs/known-issues.md)
-that are being tracked against Desktop, and some of these issues have workarounds.
+<p align="center">
+  <img src="app/static/logos/win32-installer-splash.gif" alt="Kintsugi Windows Installer Splash" width="460" />
+</p>
 
-If you can't find an issue that matches what you're seeing, open a [new issue](https://github.com/desktop/desktop/issues/new/choose),
-choose the right template and provide us with enough information to investigate
-further.
+---
 
-## The issue I reported isn't fixed yet. What can I do?
+## 🚀 Installation &amp; Usage
 
-If nobody has responded to your issue in a few days, you're welcome to respond to it with a friendly ping in the issue. Please do not respond more than a second time if nobody has responded. The GitHub Desktop maintainers are constrained in time and resources, and diagnosing individual configurations can be difficult and time consuming. While we'll try to at least get you pointed in the right direction, we can't guarantee we'll be able to dig too deeply into any one person's issue.
+### Running the Installer
 
-## How can I contribute to GitHub Desktop?
+Run the generated Windows installer:
 
-The [CONTRIBUTING.md](./.github/CONTRIBUTING.md) document will help you get setup and
-familiar with the source. The [documentation](docs/) folder also contains more
-resources relevant to the project.
+```powershell
+dist/KintsugiSetup-x64.exe
+```
 
-If you're looking for something to work on, check out the [help wanted](https://github.com/desktop/desktop/issues?q=is%3Aissue+is%3Aopen+label%3A%22help%20wanted%22) label.
+Upon installation, Kintsugi configures:
+- Start Menu and Desktop shortcuts with the custom gold-and-obsidian icon.
+- A dedicated user data folder at `%APPDATA%\Kintsugi` (isolated from standard GitHub Desktop installations).
+- The `kintsugi` command-line utility in your environment path.
 
-## Building Desktop
+### Command-Line Usage
 
-To setup your development environment for building Desktop, check out: [`setup.md`](./docs/contributing/setup.md).
+Open any repository directly from your terminal:
 
-## More Resources
+```powershell
+# Open current working directory
+kintsugi .
 
-See [desktop.github.com](https://desktop.github.com) for more product-oriented
-information about GitHub Desktop.
+# Open a specific repository path
+kintsugi C:\Work\my-project
+```
 
-See our [getting started documentation](https://docs.github.com/en/desktop/overview/getting-started-with-github-desktop) for more information on how to set up, authenticate, and configure GitHub Desktop.
+---
 
-## License
+## 🛠️ Building from Source
 
-**[MIT](LICENSE)**
+### Prerequisites
 
-The MIT license grant is not for GitHub's trademarks, which include the logo
-designs. GitHub reserves all trademark and copyright rights in and to all
-GitHub trademarks. GitHub's logos include, for instance, the stylized
-Invertocat designs that include "logo" in the file title in the following
-folder: [logos](app/static/logos).
+Ensure the following tools are installed on your Windows machine:
+- **Node.js** (v24+; project-local Node in `.tools/node-v24.22.1-win-x64` is used when present)
+- **Python** (required for compiling native Node modules)
+- **Visual Studio C++ Build Tools** (Desktop development with C++)
+- **Git for Windows**
 
-GitHub® and its stylized versions and the Invertocat mark are GitHub's
-Trademarks or registered Trademarks. When using GitHub's logos, be sure to
-follow the GitHub [logo guidelines](https://github.com/logos).
+### Build Steps
+
+1. **Clone the repository:**
+   ```powershell
+   git clone https://github.com/projectGloria/Kintsugi.git
+   cd Kintsugi
+   ```
+
+2. **Compile and package Kintsugi:**
+   Run the automated PowerShell build script:
+   ```powershell
+   ./script/build-kintsugi.ps1
+   ```
+   This script handles production compilation, bundle optimization, and installer creation. The resulting package will be output to:
+   ```
+   dist/KintsugiSetup-x64.exe
+   ```
+
+3. **Verify with the Automated Test Suite:**
+   Run the end-to-end smoke test to confirm packaging, identity isolation, and telemetry suppression:
+   ```powershell
+   node script/test-kintsugi.mjs
+   ```
+
+---
+
+## 🎨 Icon &amp; Design Philosophy
+
+<p align="center">
+  <img src="app/static/kintsugi/kintsugi-icon.png" alt="Kintsugi Icon Close-up" width="100" height="100" />
+</p>
+
+> *"A dark charcoal ceramic circular disc repaired with bold elegant gold seams, the seams subtly suggesting a branching Git graph and the letter K."*
+
+The icon embodies the spirit of Kintsugi:
+- **Obsidian Ceramic**: Represents the solid foundation of your codebase.
+- **Warm Gold Veins**: Symbolize branches, merges, and iterative improvements that make code resilient and enduring.
+- **Distraction-Free**: Clean silhouette engineered for high contrast and legibility across all Windows taskbar, system tray, and desktop resolutions (16px to 256px).
+
+---
+
+## 📜 Upstream &amp; License
+
+Kintsugi is built on top of [GitHub Desktop](https://desktop.github.com), distributed under the **[MIT License](LICENSE)**.
+
+- **Attribution**: Original code and architecture &copy; GitHub, Inc. and its community contributors.
+- **Trademarks**: GitHub&reg; and the Octocat logo are trademarks of GitHub, Inc. Kintsugi uses its own original icon and branding and is not sponsored or endorsed by GitHub, Inc.
+- **License**: See the full [LICENSE](LICENSE) file for terms and conditions.
