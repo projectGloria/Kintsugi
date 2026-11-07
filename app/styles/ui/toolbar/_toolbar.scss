@@ -118,11 +118,3 @@
     }
   }
 }
-
-// Kintsugi "Check all" button: fixed width like its siblings so the
-// description swapping between "Checking…" and "N changed" doesn't make the
-// toolbar jitter.
-#desktop-app-toolbar .toolbar-button.check-all-button {
-  width: 200px;
-  flex-shrink: 0;
-}

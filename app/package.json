@@ -3,7 +3,7 @@
   "productName": "Kintsugi",
   "bundleID": "com.kintsugi.desktop",
   "companyName": "Kintsugi",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "main": "./main.js",
   "repository": {
     "type": "git",

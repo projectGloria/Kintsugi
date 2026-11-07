@@ -56,9 +56,9 @@ import {
   BranchDropdown,
   WorktreeDropdown,
   RevertProgress,
-  ToolbarButton,
-  ToolbarButtonStyle,
 } from './toolbar'
+import { KintsugiMenu } from './window/kintsugi-menu'
+import { RepositoryLibrary } from './repository-library'
 import { iconForRepository, OcticonSymbol } from './octicons'
 import * as octicons from './octicons/octicons.generated'
 import {
@@ -529,6 +529,8 @@ export class App extends React.Component<IAppProps, IAppState> {
         return this.openCurrentRepositoryInShell()
       case 'clone-repository':
         return this.showCloneRepo()
+      case 'toggle-repository-library':
+        return this.props.dispatcher.toggleRepositoryLibrary()
       case 'show-about':
         return this.showAbout()
       case 'go-to-commit-message':
@@ -1497,6 +1499,15 @@ export class App extends React.Component<IAppProps, IAppState> {
         windowZoomFactor={this.state.windowZoomFactor}
       >
         {this.renderAppMenuBar()}
+        {__WIN32__ && !inWelcomeFlow && (
+          <KintsugiMenu
+            dispatcher={this.props.dispatcher}
+            hasAccounts={this.state.accounts.length > 0}
+            isCheckingAllRepositories={this.state.isCheckingAllRepositories}
+            cloneAllProgress={this.state.cloneAllProgress}
+            dirtyCount={this.countDirtyRepositories()}
+          />
+        )}
       </TitleBar>
     )
   }
@@ -3376,7 +3387,10 @@ export class App extends React.Component<IAppProps, IAppState> {
       >
         {this.renderToolbar()}
         {this.renderBanner()}
-        {this.renderRepository()}
+        <div className="kintsugi-main-row">
+          {this.renderRepository()}
+          {this.renderRepositoryLibrary()}
+        </div>
         {this.renderPopups()}
         {this.renderDragElement()}
       </div>
@@ -3822,45 +3836,39 @@ export class App extends React.Component<IAppProps, IAppState> {
     )
   }
 
-  private onCheckAllRepositories = () => {
-    // Fire-and-forget: progress is surfaced through AppState
-    // (isCheckingAllRepositories), not by awaiting here, so the toolbar stays
-    // in sync even if the scan is also triggered from elsewhere later.
-    this.props.dispatcher.checkAllRepositories()
-  }
-
-  private renderCheckAllToolbarButton(): JSX.Element {
-    const { isCheckingAllRepositories, localRepositoryStateLookup } = this.state
-
-    // Derived on render rather than stored: the lookup is already the single
-    // source of truth for the sidebar dots, so a cached counter could only
-    // drift out of sync with it.
+  /**
+   * Repositories with uncommitted changes. Derived on render from the lookup
+   * that already drives the sidebar dots, so it can never drift from them.
+   */
+  private countDirtyRepositories(): number {
     let dirtyCount = 0
-    for (const { changedFilesCount } of localRepositoryStateLookup.values()) {
+    for (const {
+      changedFilesCount,
+    } of this.state.localRepositoryStateLookup.values()) {
       if (changedFilesCount > 0) {
         dirtyCount++
       }
     }
+    return dirtyCount
+  }
 
-    const description = isCheckingAllRepositories
-      ? 'Checking repositories…'
-      : dirtyCount === 0
-      ? 'No uncommitted changes'
-      : `${dirtyCount} ${
-          dirtyCount === 1 ? 'repository' : 'repositories'
-        } changed`
+  private onToggleRepositoryLibrary = () => {
+    this.props.dispatcher.toggleRepositoryLibrary()
+  }
 
+  private renderRepositoryLibrary() {
+    if (this.inNoRepositoriesViewState()) {
+      return null
+    }
+    const { selectedState } = this.state
     return (
-      <ToolbarButton
-        className="check-all-button"
-        title="Check all"
-        description={description}
-        tooltip="Scan every repository for uncommitted changes"
-        icon={octicons.sync}
-        iconClassName={isCheckingAllRepositories ? 'spin' : undefined}
-        onClick={this.onCheckAllRepositories}
-        disabled={isCheckingAllRepositories}
-        style={ToolbarButtonStyle.Subtitle}
+      <RepositoryLibrary
+        repositories={this.state.repositories}
+        selectedRepository={selectedState ? selectedState.repository : null}
+        localRepositoryStateLookup={this.state.localRepositoryStateLookup}
+        onSelect={this.onSelectionChanged}
+        collapsed={this.state.isRepositoryLibraryCollapsed}
+        onToggleCollapsed={this.onToggleRepositoryLibrary}
       />
     )
   }
@@ -3989,7 +3997,6 @@ export class App extends React.Component<IAppProps, IAppState> {
         {this.renderWorktreeToolbarButton()}
         {this.renderBranchToolbarButton()}
         {this.renderPushPullToolbarButton()}
-        {this.renderCheckAllToolbarButton()}
       </Toolbar>
     )
   }

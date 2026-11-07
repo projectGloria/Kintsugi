@@ -17,6 +17,7 @@ export enum BannerType {
   SuccessfulReorder = 'SuccessfulReorder',
   ConflictsFound = 'ConflictsFound',
   OSVersionNoLongerSupported = 'OSVersionNoLongerSupported',
+  KintsugiCloneAllComplete = 'KintsugiCloneAllComplete',
 }
 
 export type Banner =
@@ -122,3 +123,9 @@ export type Banner =
       readonly onOpenConflictsDialog: () => void
     }
   | { readonly type: BannerType.OSVersionNoLongerSupported }
+  | {
+      readonly type: BannerType.KintsugiCloneAllComplete
+      readonly cloned: number
+      readonly skipped: number
+      readonly failed: number
+    }

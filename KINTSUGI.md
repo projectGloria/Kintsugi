@@ -13,6 +13,22 @@ Local repositories can be used without signing in.
 The original `kintsugi` Git branch was removed. Work continues at a detached HEAD
 based on upstream commit `bf4ec63e50eae5c5cde7043fe2eb7c94c881dd34`.
 
+## Features
+
+- **Kintsugi menu**: the button centered in the title bar. It holds
+  - *Clone all repositories*: asks for a folder, then clones every repository
+    owned by the signed-in account(s), two at a time. A repository is skipped
+    when it is already in Kintsugi or `<folder>\<name>` already exists. A
+    banner reports cloned/skipped/failed counts when the batch ends.
+  - *Check all*: runs `git status` on every repository and refreshes the change
+    dots (no fetch). It also rescans repository icons.
+- **Repository library**: a panel on the right listing every local repository
+  with its own icon. Click a repository to switch to it. Collapse it with the
+  chevron or View → Toggle repository library (Ctrl+Shift+L). Icons come from
+  `package.json` / web manifests first, then from the best-scoring
+  `icon`/`logo`/`favicon` image within three folder levels. A letter tile is
+  shown when nothing is found.
+
 ## Rebuild
 
 After installing dependencies using the vendored Yarn, run:

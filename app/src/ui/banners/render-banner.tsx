@@ -120,6 +120,17 @@ export function renderBanner(
           onUndo={banner.onUndo}
         />
       )
+    case BannerType.KintsugiCloneAllComplete:
+      return (
+        <SuccessBanner
+          key="kintsugi-clone-all-complete"
+          timeout={15000}
+          onDismissed={onDismissed}
+        >
+          Clone all finished: {banner.cloned} cloned, {banner.skipped} skipped,{' '}
+          {banner.failed} failed.
+        </SuccessBanner>
+      )
     case BannerType.SquashUndone: {
       const pluralized = banner.commitsCount === 1 ? 'commit' : 'commits'
       return (

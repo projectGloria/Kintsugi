@@ -145,6 +145,7 @@ import {
   IAPIRepoRuleset,
   deleteToken,
   IAPICreatePushProtectionBypassResponse,
+  IAPIRepository,
 } from '../api'
 import { shell } from '../app-shell'
 import {
@@ -153,6 +154,7 @@ import {
   Foldout,
   FoldoutType,
   IAppState,
+  ICloneAllProgress,
   ICompareBranch,
   ICompareFormUpdate,
   ICompareToBranch,
@@ -594,6 +596,8 @@ const selectedCopilotModelsKey = 'selected-copilot-models'
 const selectedCopilotModelsByAccountKey = 'selected-copilot-models-by-account'
 export const showChangesFilterDefault = true
 
+const repositoryLibraryCollapsedKey = 'kintsugi-library-collapsed'
+
 export class AppStore extends TypedBaseStore<IAppState> {
   private readonly gitStoreCache: GitStoreCache
 
@@ -726,6 +730,16 @@ export class AppStore extends TypedBaseStore<IAppState> {
    * that would race the first over the same GitStore instances.
    */
   private checkAllRepositoriesPromise: Promise<void> | null = null
+
+  /** In-flight "Clone all repositories" batch; same join-don't-duplicate idea. */
+  private cloneAllRepositoriesPromise: Promise<void> | null = null
+
+  /** Counters for the running clone-all batch, null when idle. */
+  private cloneAllProgress: ICloneAllProgress | null = null
+
+  /** Persisted UI preference; read once at startup, written on toggle. */
+  private isRepositoryLibraryCollapsed =
+    localStorage.getItem(repositoryLibraryCollapsedKey) === '1'
 
   /** Which step the user needs to complete next in the onboarding tutorial */
   private currentOnboardingTutorialStep = TutorialStep.NotApplicable
@@ -1342,6 +1356,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
       currentOnboardingTutorialStep: this.currentOnboardingTutorialStep,
       repositoryIndicatorsEnabled: this.repositoryIndicatorsEnabled,
       isCheckingAllRepositories: this.checkAllRepositoriesPromise !== null,
+      cloneAllProgress: this.cloneAllProgress,
+      isRepositoryLibraryCollapsed: this.isRepositoryLibraryCollapsed,
       commitSpellcheckEnabled: this.commitSpellcheckEnabled,
       currentDragElement: this.currentDragElement,
       lastThankYou: this.lastThankYou,
@@ -4307,6 +4323,132 @@ export class AppStore extends TypedBaseStore<IAppState> {
     return this.checkAllRepositoriesPromise
   }
 
+  /**
+   * Kintsugi "Clone all repositories": clone every repository owned by the
+   * signed-in account(s) into `directory`, skipping anything already tracked
+   * or already present on disk.
+   *
+   * Intentionally bypasses Dispatcher.clone(): that path selects each
+   * repository as it clones, which would yank the user's current repository
+   * around N times during a batch.
+   */
+  public _cloneAllRepositories(directory: string): Promise<void> {
+    if (this.cloneAllRepositoriesPromise !== null) {
+      return this.cloneAllRepositoriesPromise
+    }
+
+    const run = async () => {
+      // Normalize clone URLs so https://github.com/A/b.git and
+      // https://github.com/a/b compare equal.
+      const normalize = (url: string) =>
+        url
+          .trim()
+          .toLowerCase()
+          .replace(/\.git$/, '')
+          .replace(/\/+$/, '')
+
+      const tracked = new Set<string>()
+      const trackedPaths = new Set<string>()
+      for (const repo of this.repositories) {
+        trackedPaths.add(Path.resolve(repo.path).toLowerCase())
+        const url = repo.gitHubRepository?.cloneURL
+        if (url) {
+          tracked.add(normalize(url))
+        }
+      }
+
+      // Owned-only: the API list also contains collaborator and org repos,
+      // which "every repo that I have" doesn't mean.
+      const owned = new Map<string, IAPIRepository>()
+      for (const account of this.accounts) {
+        await this.apiRepositoriesStore.loadRepositories(account)
+        const state = this.apiRepositoriesStore.getState().get(account)
+        const login = account.login.toLowerCase()
+        for (const repo of state?.repositories ?? []) {
+          if (repo.owner.login.toLowerCase() === login) {
+            owned.set(normalize(repo.clone_url), repo)
+          }
+        }
+      }
+
+      let cloned = 0
+      let skipped = 0
+      let failed = 0
+      const setProgress = () => {
+        this.cloneAllProgress = { total: owned.size, cloned, skipped, failed }
+        this.emitUpdate()
+      }
+      setProgress()
+
+      // Resolve targets up front (sequentially) so two repos with the same
+      // name from different accounts can't race for the same folder.
+      const queue = new Array<{ repo: IAPIRepository; path: string }>()
+      const plannedPaths = new Set<string>()
+      for (const [url, repo] of owned) {
+        let path = Path.join(directory, repo.name)
+        if (plannedPaths.has(path.toLowerCase())) {
+          path = Path.join(directory, `${repo.owner.login}-${repo.name}`)
+        }
+
+        if (
+          tracked.has(url) ||
+          trackedPaths.has(Path.resolve(path).toLowerCase()) ||
+          (await pathExists(path))
+        ) {
+          skipped++
+          continue
+        }
+
+        plannedPaths.add(path.toLowerCase())
+        queue.push({ repo, path })
+      }
+      setProgress()
+
+      // Two concurrent clones: network-bound, so more workers mostly just
+      // split the same bandwidth while multiplying credential prompts.
+      const worker = async () => {
+        for (let item = queue.shift(); item; item = queue.shift()) {
+          const { repo, path } = item
+          try {
+            const { promise } = this._clone(repo.clone_url, path, {
+              defaultBranch: repo.default_branch,
+            })
+            // Failures are already surfaced by CloningRepositoriesStore
+            // (error dialog with a retry action), so we only count them.
+            const success = await promise
+            if (success && (await this._addRepositories([path])).length > 0) {
+              cloned++
+            } else {
+              failed++
+            }
+          } catch (e) {
+            log.warn(`[CloneAll] Failed to clone ${repo.clone_url}`, e)
+            failed++
+          }
+          setProgress()
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(2, queue.length) }, worker)
+      )
+
+      this._setBanner({
+        type: BannerType.KintsugiCloneAllComplete,
+        cloned,
+        skipped,
+        failed,
+      })
+    }
+
+    this.cloneAllRepositoriesPromise = run().finally(() => {
+      this.cloneAllRepositoriesPromise = null
+      this.cloneAllProgress = null
+      this.emitUpdate()
+    })
+    this.emitUpdate()
+    return this.cloneAllRepositoriesPromise
+  }
+
   private getRepositoriesForIndicatorRefresh = () => {
     // The currently selected repository will get refreshed by both the
     // BackgroundFetcher and the refreshRepository call from the
@@ -5759,6 +5901,15 @@ export class AppStore extends TypedBaseStore<IAppState> {
     await gitStore.refreshDefaultBranch()
 
     return this.repositoryWithRefreshedGitHubRepository(repository)
+  }
+
+  public _toggleRepositoryLibrary() {
+    this.isRepositoryLibraryCollapsed = !this.isRepositoryLibraryCollapsed
+    localStorage.setItem(
+      repositoryLibraryCollapsedKey,
+      this.isRepositoryLibraryCollapsed ? '1' : '0'
+    )
+    this.emitUpdate()
   }
 
   /** This shouldn't be called directly. See `Dispatcher`. */

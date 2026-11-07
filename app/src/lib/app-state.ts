@@ -361,6 +361,15 @@ export interface IAppState {
   readonly isCheckingAllRepositories: boolean
 
   /**
+   * Progress of a running Kintsugi "Clone all repositories" batch, or null
+   * when no batch is running.
+   */
+  readonly cloneAllProgress: ICloneAllProgress | null
+
+  /** Whether the right-hand repository library is collapsed to an icon strip. */
+  readonly isRepositoryLibraryCollapsed: boolean
+
+  /**
    * Whether or not the app should use spell check on commit summary and description
    */
   readonly commitSpellcheckEnabled: boolean
@@ -1223,4 +1232,13 @@ export interface IPullRequestState {
 
   /** The result of merging the pull request branch into the base branch */
   readonly mergeStatus: MergeTreeResult | null
+}
+
+/** Progress counters for a Kintsugi "Clone all repositories" batch. */
+export interface ICloneAllProgress {
+  /** Number of owned repositories considered (cloned + skipped + failed + pending). */
+  readonly total: number
+  readonly cloned: number
+  readonly skipped: number
+  readonly failed: number
 }

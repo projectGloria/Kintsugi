@@ -2946,6 +2946,19 @@ export class Dispatcher {
     return this.appStore._checkAllRepositories()
   }
 
+  /**
+   * Clone every repository owned by the signed-in account(s) into the given
+   * directory, skipping ones already tracked or present on disk.
+   */
+  public cloneAllRepositories(directory: string): Promise<void> {
+    return this.appStore._cloneAllRepositories(directory)
+  }
+
+  /** Collapse/expand the right-hand repository library. */
+  public toggleRepositoryLibrary() {
+    this.appStore._toggleRepositoryLibrary()
+  }
+
   public setCommitSpellcheckEnabled(commitSpellcheckEnabled: boolean) {
     this.appStore._setCommitSpellcheckEnabled(commitSpellcheckEnabled)
   }

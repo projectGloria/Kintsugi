@@ -201,6 +201,14 @@ export function buildDefaultMenuTemplate({
         click: emit('choose-repository'),
       },
       {
+        label: __DARWIN__
+          ? 'Toggle Repository Library'
+          : 'Toggle repository librar&y',
+        id: 'toggle-repository-library',
+        accelerator: 'CmdOrCtrl+Shift+L',
+        click: emit('toggle-repository-library'),
+      },
+      {
         label: __DARWIN__ ? 'Show Branches List' : '&Branches list',
         id: 'show-branches-list',
         accelerator: 'CmdOrCtrl+B',
