@@ -4,14 +4,16 @@
 
 // Primer colors, see https://github.com/primer/primer-css/blob/master/modules/primer-support/lib/variables/color-system.scss
 @import '~primer-support/lib/variables/color-system.scss';
+// Kintsugi re-skin: must follow the Primer import (see file header).
+@import '../kintsugi-palette';
 
 // This should be something like
 // @media (prefers-color-scheme: dark)
 // See https://developer.mozilla.org/en-US/docs/Web/CSS/@media/prefers-color-scheme
 // https://www.electronjs.org/docs/api/native-theme#nativethemethemesource
 
-// This blue passes WCAG 2 guidelines with $gray-100 fg and $gray-900 bg.
-$link-color: #2e8fff;
+// Light terracotta keeps link text readable on the black background.
+$link-color: $blue-300;
 
 body.theme-dark {
   --color-new: #{$green};
@@ -96,7 +98,7 @@ body.theme-dark {
   /**
    * Border color for boxes.
    */
-  --box-border-color: #141414;
+  --box-border-color: #{$gray-800};
 
   // slightly lighter of gray-500 to get 3:1 contrast ratio against
   // --box-alt-background-color
@@ -437,8 +439,8 @@ body.theme-dark {
   --md-fg-muted-color: #8b949e;
   --md-danger-fg-color: #f85149;
   --md-neutral-muted-color: rgba(110, 118, 129, 0.4);
-  --md-accent-emphasis-color: #1f6feb;
-  --md-accent-fg-color: #58a6ff;
+  --md-accent-emphasis-color: #{$blue};
+  --md-accent-fg-color: #{$blue-300};
 }
 
 // this emulates the cursor for the co-author input because it isn't exactly

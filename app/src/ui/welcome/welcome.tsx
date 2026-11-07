@@ -43,9 +43,11 @@ interface IWelcomeState {
 
 // Note that we're reusing the welcome illustrations in the crash process, any
 // changes to these will have to be reflected in the crash process as well.
+// Full-res 2048px artwork (not the 256px icon PNG) so it stays crisp at
+// high DPI where the panel renders ~2x its CSS size.
 const WelcomeRightImageUri = encodePathAsUrl(
   __dirname,
-  'static/kintsugi-icon.png'
+  'static/kintsugi-welcome.jpg'
 )
 export const WelcomeLeftTopImageUri = encodePathAsUrl(
   __dirname,

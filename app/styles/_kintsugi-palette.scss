@@ -1,0 +1,52 @@
+// Kintsugi palette
+//
+// Overrides the Primer color-system variables right after they're imported,
+// so every theme rule that derives from `$blue*` / `$gray*` (including
+// lighten()/darken() calls) re-skins in one place instead of editing hundreds
+// of individual custom properties.
+//
+// MUST be imported immediately after each
+// `@import '~primer-support/lib/variables/color-system.scss'`: the dark theme
+// re-imports Primer, which would otherwise reset these back to GitHub blue.
+//
+// Brand inputs:
+//   Terracotta #C15F3C  -> accent (replaces Primer blue)
+//   White      #FFFFFF  -> light surfaces
+//   Cream      #F4F3EE  -> secondary light surfaces
+//   Black      #000000  -> darkest neutral (replaces the brand's #B1ADA1 per
+//                         design decision)
+
+$kintsugi-terracotta: #c15f3c;
+$kintsugi-cream: #f4f3ee;
+$kintsugi-black: #000000;
+
+// Accent ramp: tints/shades of terracotta mapped onto Primer's blue slots.
+$blue-000: #fbf1ec;
+$blue-100: #f6ddd2;
+$blue-200: #ecbba6;
+$blue-300: #e09878;
+$blue-400: #d07a55;
+$blue-500: $kintsugi-terracotta;
+$blue-600: #a64f30;
+$blue-700: #8a4127;
+$blue-800: #6b321e;
+$blue-900: #4a2215;
+$blue: $blue-500;
+
+// Neutral ramp: warm (cream-tinted) greys from cream down to pure black, so
+// mid-tones don't clash with the cream surfaces the way Primer's cool
+// blue-greys would.
+$gray-000: #faf9f6;
+$gray-100: $kintsugi-cream;
+$gray-200: #e5e3dc;
+$gray-300: #d2cfc6;
+$gray-400: #9d998f;
+$gray-500: #75726a;
+$gray-600: #5a5852;
+$gray-700: #393835;
+$gray-800: #1f1e1c;
+$gray-900: $kintsugi-black;
+$gray: $gray-500;
+$gray-dark: $gray-900;
+$gray-light: $gray-400;
+$gray-lighter: $gray-100;

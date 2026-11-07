@@ -56,6 +56,8 @@ import {
   BranchDropdown,
   WorktreeDropdown,
   RevertProgress,
+  ToolbarButton,
+  ToolbarButtonStyle,
 } from './toolbar'
 import { iconForRepository, OcticonSymbol } from './octicons'
 import * as octicons from './octicons/octicons.generated'
@@ -3820,6 +3822,49 @@ export class App extends React.Component<IAppProps, IAppState> {
     )
   }
 
+  private onCheckAllRepositories = () => {
+    // Fire-and-forget: progress is surfaced through AppState
+    // (isCheckingAllRepositories), not by awaiting here, so the toolbar stays
+    // in sync even if the scan is also triggered from elsewhere later.
+    this.props.dispatcher.checkAllRepositories()
+  }
+
+  private renderCheckAllToolbarButton(): JSX.Element {
+    const { isCheckingAllRepositories, localRepositoryStateLookup } = this.state
+
+    // Derived on render rather than stored: the lookup is already the single
+    // source of truth for the sidebar dots, so a cached counter could only
+    // drift out of sync with it.
+    let dirtyCount = 0
+    for (const { changedFilesCount } of localRepositoryStateLookup.values()) {
+      if (changedFilesCount > 0) {
+        dirtyCount++
+      }
+    }
+
+    const description = isCheckingAllRepositories
+      ? 'Checking repositories…'
+      : dirtyCount === 0
+      ? 'No uncommitted changes'
+      : `${dirtyCount} ${
+          dirtyCount === 1 ? 'repository' : 'repositories'
+        } changed`
+
+    return (
+      <ToolbarButton
+        className="check-all-button"
+        title="Check all"
+        description={description}
+        tooltip="Scan every repository for uncommitted changes"
+        icon={octicons.sync}
+        iconClassName={isCheckingAllRepositories ? 'spin' : undefined}
+        onClick={this.onCheckAllRepositories}
+        disabled={isCheckingAllRepositories}
+        style={ToolbarButtonStyle.Subtitle}
+      />
+    )
+  }
+
   private renderWorktreeToolbarButton(): JSX.Element | null {
     if (!enableWorktreeSupport()) {
       return null
@@ -3944,6 +3989,7 @@ export class App extends React.Component<IAppProps, IAppState> {
         {this.renderWorktreeToolbarButton()}
         {this.renderBranchToolbarButton()}
         {this.renderPushPullToolbarButton()}
+        {this.renderCheckAllToolbarButton()}
       </Toolbar>
     )
   }

@@ -33,8 +33,14 @@ with isolated application data and a disposable repository inside `.tools`.
 
 ## Icon
 
-The built-in image generation tool created `app/static/kintsugi/kintsugi-icon.png`.
-Windows ICO sizes and the installer splash were derived from that source.
+`Kintsugi.ico` in the project root is the official icon. It is copied to
+`app/static/logos/{prod,dev}/icon-logo.ico` (executable and installer icon), and
+its embedded 256px/128px PNGs back the in-app images (`kintsugi-icon.png`,
+About logos, Linux `icon-logo.png`). The installer splash GIF still uses the
+previous artwork. `Kintsugi.jpg` (2048px) is the welcome screen artwork, copied to
+`app/static/common/kintsugi-welcome.jpg`.
+
+The previous icon was created by the built-in image generation tool from:
 
 Prompt: Create a finished Windows desktop application icon for Kintsugi, a personal
 Git client. Single centered polished symbol: a dark charcoal ceramic circular disc

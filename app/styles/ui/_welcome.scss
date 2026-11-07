@@ -340,12 +340,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #17191c;
+  // Matches the artwork's pure-black background so the image edge vanishes.
+  background: #000;
 
   .welcome-graphic {
     position: static;
-    width: 80%;
-    max-width: 420px;
+    width: 90%;
+    max-width: 640px;
     height: auto;
     object-fit: contain;
   }

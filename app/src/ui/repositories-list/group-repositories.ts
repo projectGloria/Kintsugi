@@ -16,7 +16,7 @@ import { Owner } from '../../models/owner'
 
 export type RepositoryListGroup =
   | {
-      kind: 'recent' | 'other'
+      kind: 'changes' | 'recent' | 'other'
     }
   | {
       kind: 'dotcom'
@@ -35,6 +35,9 @@ export type RepositoryListGroup =
 export const getGroupKey = (group: RepositoryListGroup) => {
   const { kind } = group
   switch (kind) {
+    // '0:changes' < '0:recent', so dirty repos float to the very top.
+    case 'changes':
+      return `0:changes`
     case 'recent':
       return `0:recent`
     case 'dotcom':
@@ -95,6 +98,18 @@ export function groupRepositories(
   }
 
   for (const repo of repositories) {
+    // Kintsugi: mirror every repo with uncommitted changes into a pinned
+    // 'Changes' section. Derived from the same lookup that drives the dots
+    // (filled by 'Check all' and the background updater), so the section and
+    // the dots can never disagree. Like 'recent', it's a duplicate view: the
+    // repo still appears in its normal group too.
+    if (
+      repo instanceof Repository &&
+      (localRepositoryStateLookup.get(repo.id)?.changedFilesCount ?? 0) > 0
+    ) {
+      addToGroup({ kind: 'changes' }, repo)
+    }
+
     if (recentSet?.has(repo.id) && repo instanceof Repository) {
       addToGroup({ kind: 'recent' }, repo)
     }
@@ -130,9 +145,12 @@ const toSortedListItems = (
   const allNames = new Map<string, number>()
 
   for (const groupItem of groups.values()) {
-    // All items in the recent group are by definition present in another
+    // All items in the recent/changes groups are by definition present in another
     // group and therefore we don't want to count them.
-    if (groupItem.group.kind === 'recent') {
+    if (
+      groupItem.group.kind === 'recent' ||
+      groupItem.group.kind === 'changes'
+    ) {
       continue
     }
 
@@ -161,7 +179,8 @@ const toSortedListItems = (
           // group and has a duplicate name in any group, we need to
           // disambiguate it.
           ((groupNames.get(title) ?? 0) > 1 && group.kind === 'enterprise') ||
-          ((allNames.get(title) ?? 0) > 1 && group.kind === 'recent'),
+          ((allNames.get(title) ?? 0) > 1 &&
+            (group.kind === 'recent' || group.kind === 'changes')),
         aheadBehind: repoState?.aheadBehind ?? null,
         changedFilesCount: repoState?.changedFilesCount ?? 0,
       }

@@ -355,6 +355,12 @@ export interface IAppState {
   readonly repositoryIndicatorsEnabled: boolean
 
   /**
+   * Whether a user-initiated "Check all" pass is currently scanning every
+   * repository's working directory to refresh the sidebar change indicators.
+   */
+  readonly isCheckingAllRepositories: boolean
+
+  /**
    * Whether or not the app should use spell check on commit summary and description
    */
   readonly commitSpellcheckEnabled: boolean

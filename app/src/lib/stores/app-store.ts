@@ -720,6 +720,13 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
   private repositoryIndicatorsEnabled: boolean
 
+  /**
+   * In-flight "Check all" pass. Holding the promise (not just a boolean) lets
+   * repeated clicks join the running scan instead of spawning a second one
+   * that would race the first over the same GitStore instances.
+   */
+  private checkAllRepositoriesPromise: Promise<void> | null = null
+
   /** Which step the user needs to complete next in the onboarding tutorial */
   private currentOnboardingTutorialStep = TutorialStep.NotApplicable
   private readonly tutorialAssessor: OnboardingTutorialAssessor
@@ -1334,6 +1341,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
       optOutOfUsageTracking: this.statsStore.getOptOut(),
       currentOnboardingTutorialStep: this.currentOnboardingTutorialStep,
       repositoryIndicatorsEnabled: this.repositoryIndicatorsEnabled,
+      isCheckingAllRepositories: this.checkAllRepositoriesPromise !== null,
       commitSpellcheckEnabled: this.commitSpellcheckEnabled,
       currentDragElement: this.currentDragElement,
       lastThankYou: this.lastThankYou,
@@ -4200,29 +4208,12 @@ export class AppStore extends TypedBaseStore<IAppState> {
    * Refresh indicator in repository list for a specific repository
    */
   private refreshIndicatorForRepository = async (repository: Repository) => {
+    const gitStore = await this.refreshChangesIndicatorForRepository(repository)
+    if (gitStore === null) {
+      return
+    }
+
     const lookup = this.localRepositoryStateLookup
-
-    if (repository.missing) {
-      lookup.delete(repository.id)
-      return
-    }
-
-    const exists = await pathExists(repository.path)
-    if (!exists) {
-      lookup.delete(repository.id)
-      return
-    }
-
-    const gitStore = this.gitStoreCache.get(repository)
-    const status = await gitStore.loadStatus()
-    if (status === null) {
-      lookup.delete(repository.id)
-      return
-    }
-
-    this.updateSidebarIndicator(repository, status)
-    this.emitUpdate()
-
     const lastPush = await inferLastPushForRepository(
       this.accounts,
       gitStore,
@@ -4241,6 +4232,79 @@ export class AppStore extends TypedBaseStore<IAppState> {
       })
       this.emitUpdate()
     }
+  }
+
+  /**
+   * Local-only half of the indicator refresh: runs `git status` and updates
+   * the changed-files dot. No network, so it's cheap enough to run across
+   * every repository on demand. Returns the GitStore when the repository is
+   * usable so the caller can continue with the (network-bound) fetch half.
+   */
+  private async refreshChangesIndicatorForRepository(
+    repository: Repository
+  ): Promise<GitStore | null> {
+    const lookup = this.localRepositoryStateLookup
+
+    if (repository.missing || !(await pathExists(repository.path))) {
+      lookup.delete(repository.id)
+      this.emitUpdate()
+      return null
+    }
+
+    const gitStore = this.gitStoreCache.get(repository)
+    const status = await gitStore.loadStatus()
+    if (status === null) {
+      lookup.delete(repository.id)
+      this.emitUpdate()
+      return null
+    }
+
+    this.updateSidebarIndicator(repository, status)
+    this.emitUpdate()
+    return gitStore
+  }
+
+  /**
+   * "Check all": rescan every repository's working directory right now
+   * instead of waiting for the 15-minute RepositoryIndicatorUpdater tick.
+   *
+   * Deliberately status-only (no fetch) so the pass finishes in seconds and
+   * never stalls on a slow remote or an auth prompt; ahead/behind arrows stay
+   * owned by the background updater. Includes the selected repository too,
+   * since the user expects "all" to mean all.
+   */
+  public _checkAllRepositories(): Promise<void> {
+    if (this.checkAllRepositoriesPromise !== null) {
+      return this.checkAllRepositoriesPromise
+    }
+
+    const run = async () => {
+      // Snapshot: the list can be mutated (add/remove) while we're scanning.
+      const queue = [...this.repositories]
+      // A handful of concurrent `git status` processes: fast on SSDs without
+      // spawning one git.exe per repo when someone has 200 repos.
+      const workerCount = Math.min(4, queue.length)
+      const worker = async () => {
+        for (let repo = queue.shift(); repo; repo = queue.shift()) {
+          try {
+            await this.refreshChangesIndicatorForRepository(repo)
+          } catch (e) {
+            // One broken repo (locked index, corrupt .git) must not abort
+            // the whole pass.
+            log.warn(`[CheckAll] Failed to check ${repo.path}`, e)
+          }
+        }
+      }
+      await Promise.all(Array.from({ length: workerCount }, worker))
+    }
+
+    this.checkAllRepositoriesPromise = run().finally(() => {
+      this.checkAllRepositoriesPromise = null
+      this.emitUpdate()
+    })
+    // Emit after assignment so getState() reports isCheckingAllRepositories.
+    this.emitUpdate()
+    return this.checkAllRepositoriesPromise
   }
 
   private getRepositoriesForIndicatorRefresh = () => {

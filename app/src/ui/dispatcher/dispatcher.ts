@@ -2941,6 +2941,11 @@ export class Dispatcher {
     this.appStore._setRepositoryIndicatorsEnabled(repositoryIndicatorsEnabled)
   }
 
+  /** Rescan every repository's working directory for uncommitted changes. */
+  public checkAllRepositories(): Promise<void> {
+    return this.appStore._checkAllRepositories()
+  }
+
   public setCommitSpellcheckEnabled(commitSpellcheckEnabled: boolean) {
     this.appStore._setCommitSpellcheckEnabled(commitSpellcheckEnabled)
   }
