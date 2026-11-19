@@ -186,6 +186,20 @@ Ensure the following tools are installed on your Windows machine:
 
 ---
 
+## 📦 How to Release
+
+Tagging a version automatically triggers the **Build Installers** GitHub Actions workflow (`.github/workflows/build-installers.yml`), which builds the Windows x64 `.exe` installer (`kintsugi-<version>-windows-x64.exe`), uploads it as the `installers` workflow artifact, and publishes a GitHub Release with the installer attached.
+
+1. **Create and push a version tag:**
+   ```powershell
+   git tag v1.0.0 && git push --tags
+   ```
+2. **Download the installers:**
+   - **Tag releases:** Open the repository's **Releases** page on GitHub and download `kintsugi-<version>-windows-x64.exe` from the release assets.
+   - **Manual builds:** Trigger **Actions → Build Installers → Run workflow**, then download the `installers` artifact from the completed workflow run.
+
+---
+
 ## 🎨 Icon &amp; Design Philosophy
 
 <p align="center">
