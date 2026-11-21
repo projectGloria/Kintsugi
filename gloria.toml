@@ -1,0 +1,10 @@
+id            = "Kintsugi"
+name          = "Kintsugi"
+version       = "1.1.0"
+main_exe      = "Kintsugi.exe"
+icon          = "Kintsugi.ico"
+accent        = "#eab308"
+description   = "Telemetry-free personal Git desktop client"
+needs_webview2 = false
+data_folders  = ["%APPDATA%\\Kintsugi"]
+legacy_names  = []
