@@ -21,3 +21,4 @@ junit*.xml
 tslint-rules/
 playwright-videos/
 .tools/
+[Dd]esktop.ini
