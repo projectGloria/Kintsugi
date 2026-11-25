@@ -98,7 +98,6 @@ import { About } from './about'
 import { Publish } from './publish-repository'
 import { Acknowledgements } from './acknowledgements'
 import { UntrustedCertificate } from './untrusted-certificate'
-import { NoRepositoriesView } from './no-repositories'
 import { ConfirmRemoveRepository } from './remove-repository'
 import { TermsAndConditions } from './terms-and-conditions'
 import { PushBranchCommits } from './branches'
@@ -869,29 +868,6 @@ export class App extends React.Component<IAppProps, IAppState> {
     })
   }
 
-  private showCreateTutorialRepositoryPopup = () => {
-    const account =
-      this.state.accounts.find(isDotComAccount) ?? this.state.accounts.at(0)
-
-    if (!account) {
-      return
-    }
-
-    this.props.dispatcher.showPopup({
-      type: PopupType.CreateTutorialRepository,
-      account,
-    })
-  }
-
-  private onResumeTutorialRepository = () => {
-    const tutorialRepository = this.getSelectedTutorialRepository()
-    if (!tutorialRepository) {
-      return
-    }
-
-    this.props.dispatcher.resumeTutorial(tutorialRepository)
-  }
-
   private getSelectedTutorialRepository() {
     const { selectedState } = this.state
     const selectedRepository =
@@ -1484,17 +1460,9 @@ export class App extends React.Component<IAppProps, IAppState> {
 
     const showAppIcon = __WIN32__ && !this.state.showWelcomeFlow
     const inWelcomeFlow = this.state.showWelcomeFlow
-    const inNoRepositoriesView = this.inNoRepositoriesViewState()
 
-    // The light title bar style should only be used while we're in
-    // the welcome flow as well as the no-repositories blank slate
-    // on macOS. The latter case has to do with the application menu
-    // being part of the title bar on Windows. We need to render
-    // the app menu in the no-repositories blank slate on Windows but
-    // the menu doesn't support the light style at the moment so we're
-    // forcing it to use the dark style.
-    const titleBarStyle =
-      inWelcomeFlow || (__DARWIN__ && inNoRepositoriesView) ? 'light' : 'dark'
+    // The light title bar style is only used while we're in the welcome flow.
+    const titleBarStyle = inWelcomeFlow ? 'light' : 'dark'
 
     return (
       <TitleBar
@@ -3898,9 +3866,6 @@ export class App extends React.Component<IAppProps, IAppState> {
   }
 
   private renderRepositoryLibrary() {
-    if (this.inNoRepositoriesViewState()) {
-      return null
-    }
     const { selectedState } = this.state
     return (
       <RepositoryLibrary
@@ -3961,14 +3926,6 @@ export class App extends React.Component<IAppProps, IAppState> {
 
   // we currently only render one banner at a time
   private renderBanner(): JSX.Element | null {
-    // The inset light title bar style without the toolbar
-    // can't support banners at the moment. So for the
-    // no-repositories blank slate we'll have to live without
-    // them.
-    if (this.inNoRepositoriesViewState()) {
-      return null
-    }
-
     let banner = null
     if (this.state.currentBanner !== null) {
       banner = renderBanner(
@@ -4021,13 +3978,6 @@ export class App extends React.Component<IAppProps, IAppState> {
   }
 
   private renderToolbar() {
-    /**
-     * No toolbar if we're in the blank slate view.
-     */
-    if (this.inNoRepositoriesViewState()) {
-      return null
-    }
-
     const width = clamp(this.state.sidebarWidth)
 
     return (
@@ -4043,24 +3993,6 @@ export class App extends React.Component<IAppProps, IAppState> {
   }
 
   private renderRepository() {
-    const { accounts } = this.state
-
-    if (this.inNoRepositoriesViewState()) {
-      return (
-        <NoRepositoriesView
-          accounts={accounts}
-          onCreate={this.showCreateRepository}
-          onClone={this.showCloneRepo}
-          onAdd={this.showAddLocalRepo}
-          onCreateTutorialRepository={this.showCreateTutorialRepositoryPopup}
-          onResumeTutorialRepository={this.onResumeTutorialRepository}
-          tutorialPaused={this.isTutorialPaused()}
-          apiRepositories={this.state.apiRepositories}
-          onRefreshRepositories={this.onRefreshRepositories}
-        />
-      )
-    }
-
     const state = this.state
 
     const selectedState = state.selectedState
@@ -4236,14 +4168,6 @@ export class App extends React.Component<IAppProps, IAppState> {
     this.props.dispatcher.executeCompare(repository, {
       kind: HistoryTabMode.History,
     })
-  }
-
-  private inNoRepositoriesViewState() {
-    return this.state.repositories.length === 0 || this.isTutorialPaused()
-  }
-
-  private isTutorialPaused() {
-    return this.state.currentOnboardingTutorialStep === TutorialStep.Paused
   }
 
   /**
