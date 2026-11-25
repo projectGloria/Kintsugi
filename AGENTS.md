@@ -39,7 +39,7 @@ Telemetry-free personal Git desktop client for Windows x64: a rebranded GitHub D
 - **GitHub Actions & Releases:** Read `.brain/github-actions.md` before creating/modifying `.github/workflows/*.yml`, setting up release automation, or debugging a failed release.
 
 ## Repo Guardrails & Gotchas
-- **Legacy Release Workflow:** `.github/workflows/build-installers.yml` (tag-triggered, pins `projectGloria/GloriaSetup@v0.1.0`) predates the shared template; it should be replaced by `release.yml` per `.brain/github-actions.md`.
+- **Release Workflow Build Job:** `release.yml`'s `build` job runs `yarn` + `yarn build:prod` (Python 3.11, Node from `.node-version`) and stages `dist/Kintsugi-win32-x64`; the old tag-triggered `build-installers.yml` was removed.
 - **Squirrel Leftovers:** `yarn package` / `script/build-kintsugi.ps1` still emit the old Squirrel `dist/KintsugiSetup-x64.exe`; releases use GloriaSetup on `dist/Kintsugi-win32-x64` instead.
 - **Upstream Workflows:** `ci.yml` and `codeql.yml` trigger only on the `development` branch, so they never run on `main`; `draft-release.yml`, `release-pr.yml`, and `triage-*.yml` are upstream GitHub Desktop automation.
 - **IPC Imports:** Never import `ipcRenderer`/`ipcMain` from `electron`; use `app/src/lib/ipc-renderer.ts` and `app/src/main-process/ipc-main.ts` (`.github/copilot-instructions.md` lists the latter under `app/src/lib/` — wrong).
