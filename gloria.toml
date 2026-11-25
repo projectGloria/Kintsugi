@@ -1,6 +1,6 @@
 id            = "Kintsugi"
 name          = "Kintsugi"
-version       = "1.2.0"
+version       = "1.2.1"
 main_exe      = "Kintsugi.exe"
 icon          = "Kintsugi.ico"
 accent        = "#eab308"
