@@ -16,7 +16,11 @@ interface IKintsugiMenuProps {
   readonly cloneAllProgress: ICloneAllProgress | null
   /** Repositories with uncommitted changes (derived by the caller). */
   readonly dirtyCount: number
+  readonly isRedAlertRunning: boolean
 }
+
+/** How long the armed "click again" state of Red alert lasts. */
+const RedAlertArmMs = 4000
 
 /**
  * The centered "Kintsugi" button in the Windows title bar. Hosts the
@@ -54,6 +58,22 @@ export function KintsugiMenu(props: IKintsugiMenuProps) {
 
   const onToggleOpen = React.useCallback(() => setOpen(o => !o), [])
 
+  // Red alert commits and pushes everything, so it takes two clicks: the
+  // first arms it for a few seconds, the second fires.
+  const [armed, setArmed] = React.useState(false)
+  React.useEffect(() => {
+    if (!armed) {
+      return
+    }
+    const timer = window.setTimeout(() => setArmed(false), RedAlertArmMs)
+    return () => window.clearTimeout(timer)
+  }, [armed])
+  React.useEffect(() => {
+    if (!open) {
+      setArmed(false)
+    }
+  }, [open])
+
   // useCallback rather than inline arrows: repo lint (react/jsx-no-bind)
   // forbids fresh function identities in JSX props.
   const { hasAccounts } = props
@@ -84,16 +104,28 @@ export function KintsugiMenu(props: IKintsugiMenuProps) {
     dispatcher.checkAllRepositories()
   }, [dispatcher])
 
-  const busyLabel =
-    cloneAllProgress !== null
-      ? `Cloning ${
-          cloneAllProgress.cloned +
-          cloneAllProgress.skipped +
-          cloneAllProgress.failed
-        }/${cloneAllProgress.total}`
-      : isCheckingAllRepositories
-      ? 'Checking…'
-      : null
+  const onRedAlert = React.useCallback(() => {
+    if (!armed) {
+      setArmed(true)
+      return
+    }
+    setArmed(false)
+    setOpen(false)
+    dispatcher.redAlert()
+  }, [armed, dispatcher])
+
+  const { isRedAlertRunning } = props
+  const busyLabel = isRedAlertRunning
+    ? 'Red alert…'
+    : cloneAllProgress !== null
+    ? `Cloning ${
+        cloneAllProgress.cloned +
+        cloneAllProgress.skipped +
+        cloneAllProgress.failed
+      }/${cloneAllProgress.total}`
+    : isCheckingAllRepositories
+    ? 'Checking…'
+    : null
 
   const checkAllDescription = isCheckingAllRepositories
     ? 'Checking repositories…'
@@ -108,6 +140,12 @@ export function KintsugiMenu(props: IKintsugiMenuProps) {
     : cloneAllProgress !== null
     ? `${cloneAllProgress.cloned} cloned · ${cloneAllProgress.skipped} skipped · ${cloneAllProgress.failed} failed`
     : 'Every repository you own; existing ones are skipped'
+
+  const redAlertDescription = isRedAlertRunning
+    ? 'Committing and pushing…'
+    : armed
+    ? 'Click again to commit & push every changed repository'
+    : 'Commit every change with a generated message, then push'
 
   return (
     <div className="kintsugi-menu" ref={rootRef}>
@@ -147,6 +185,16 @@ export function KintsugiMenu(props: IKintsugiMenuProps) {
             spinning={isCheckingAllRepositories}
             onClick={onCheckAll}
           />
+          <div className="kintsugi-menu-separator" role="separator" />
+          <MenuItem
+            icon={octicons.alert}
+            title={armed ? 'Red alert! Are you sure?' : 'Red alert!'}
+            description={redAlertDescription}
+            disabled={isRedAlertRunning || cloneAllProgress !== null}
+            spinning={false}
+            className={classNames('red-alert', { armed })}
+            onClick={onRedAlert}
+          />
         </div>
       )}
     </div>
@@ -159,13 +207,14 @@ interface IMenuItemProps {
   readonly description: string
   readonly disabled: boolean
   readonly spinning: boolean
+  readonly className?: string
   readonly onClick: () => void
 }
 
 function MenuItem(props: IMenuItemProps) {
   return (
     <button
-      className="kintsugi-menu-item"
+      className={classNames('kintsugi-menu-item', props.className)}
       role="menuitem"
       disabled={props.disabled}
       onClick={props.onClick}

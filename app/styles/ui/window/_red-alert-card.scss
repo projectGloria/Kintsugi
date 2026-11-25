@@ -1,0 +1,229 @@
+// Kintsugi "Red alert!" card: bulk commit-and-push progress.
+.red-alert-card {
+  width: 360px;
+  padding: 12px 14px;
+  border: 1px solid rgba(217, 83, 79, 0.65);
+  border-radius: 8px;
+  background: var(--box-background-color);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(217, 83, 79, 0.15);
+  animation: red-alert-card-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  user-select: none;
+
+  &.phase-scanning,
+  &.phase-running {
+    animation: red-alert-card-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2), red-alert-card-pulse 1.6s ease-in-out 220ms infinite;
+  }
+
+  &.clean {
+    border-color: rgba(78, 154, 110, 0.6);
+
+    .red-alert-card-icon {
+      color: #4e9a6e;
+      background: rgba(78, 154, 110, 0.15);
+    }
+  }
+}
+
+@keyframes red-alert-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes red-alert-card-pulse {
+  0%,
+  100% {
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(217, 83, 79, 0.15);
+  }
+  50% {
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 4px rgba(217, 83, 79, 0.25);
+  }
+}
+
+.red-alert-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.red-alert-card-icon {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #e5534b;
+  background: rgba(217, 83, 79, 0.16);
+
+  .octicon {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+.red-alert-card-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+
+  .title {
+    font-weight: 600;
+  }
+
+  .subtitle {
+    color: var(--text-secondary-color);
+    font-size: var(--font-size-sm);
+  }
+}
+
+.red-alert-card-close {
+  align-self: flex-start;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  padding: 2px 4px;
+  color: var(--text-secondary-color);
+  cursor: pointer;
+  transition: color 150ms, background-color 150ms;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--text-color);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  &:active {
+    background: rgba(255, 255, 255, 0.1);
+  }
+}
+
+.red-alert-card-bar {
+  position: relative;
+  height: 6px;
+  margin-top: 10px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+
+  .fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #7f1d1d, #e5534b, #f59e0b);
+    transition: width 250ms ease-out;
+  }
+
+  &.indeterminate .fill {
+    position: absolute;
+    width: 35%;
+    animation: red-alert-card-sweep 1.1s ease-in-out infinite;
+  }
+}
+
+@keyframes red-alert-card-sweep {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+.red-alert-card-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+
+  li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: var(--font-size-sm);
+
+    > .octicon {
+      flex-shrink: 0;
+      width: 12px;
+      height: 12px;
+      margin-top: 2px;
+      color: var(--text-secondary-color);
+    }
+
+    .row-text {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    .name,
+    .detail {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .detail {
+      color: var(--text-secondary-color);
+    }
+
+    &.status-writing,
+    &.status-committing,
+    &.status-pushing {
+      > .octicon {
+        color: #e5534b;
+      }
+    }
+
+    &.status-done > .octicon,
+    &.status-committed > .octicon {
+      color: #4e9a6e;
+    }
+
+    &.status-skipped > .octicon {
+      color: #d9a23b;
+    }
+
+    &.status-failed {
+      > .octicon,
+      .detail {
+        color: #e5534b;
+      }
+    }
+
+    &.more {
+      color: var(--text-secondary-color);
+      padding-left: 20px;
+    }
+  }
+}
+
+// Both Kintsugi cards stack in one column centered under the title bar.
+.kintsugi-cards {
+  position: fixed;
+  top: 44px;
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transform: translateX(-50%);
+  pointer-events: none;
+
+  > * {
+    pointer-events: auto;
+  }
+
+  &:empty {
+    display: none;
+  }
+}

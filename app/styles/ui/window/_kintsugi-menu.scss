@@ -99,6 +99,35 @@
     opacity: 0.6;
     cursor: default;
   }
+
+  &.red-alert {
+    transition: background-color 150ms, box-shadow 150ms;
+
+    .octicon,
+    .title {
+      color: #e5534b;
+    }
+
+    &:hover:not(:disabled),
+    &:focus-visible {
+      background: rgba(217, 83, 79, 0.14);
+    }
+
+    &:active:not(:disabled) {
+      background: rgba(217, 83, 79, 0.24);
+    }
+
+    &.armed {
+      background: rgba(217, 83, 79, 0.2);
+      box-shadow: inset 0 0 0 1px rgba(229, 83, 75, 0.7);
+    }
+  }
+}
+
+.kintsugi-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--box-border-color);
 }
 
 .kintsugi-menu-item-text {

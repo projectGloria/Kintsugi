@@ -60,6 +60,22 @@ export function RepositoryLibrary(props: IRepositoryLibraryProps) {
       )
   }, [repositories, filter])
 
+  const { localRepositoryStateLookup } = props
+  const changeCountOf = React.useCallback(
+    (repo: LibraryRepository) =>
+      repo instanceof Repository
+        ? localRepositoryStateLookup.get(repo.id)?.changedFilesCount ?? 0
+        : 0,
+    [localRepositoryStateLookup]
+  )
+
+  // "Changes" section: repositories with something to commit, the set
+  // Check all reports, pinned above the full alphabetical list.
+  const changed = React.useMemo(
+    () => visible.filter(r => changeCountOf(r) > 0),
+    [visible, changeCountOf]
+  )
+
   const selectedHash = props.selectedRepository?.hash ?? null
 
   return (
@@ -94,16 +110,40 @@ export function RepositoryLibrary(props: IRepositoryLibraryProps) {
         />
       )}
       <ul className="repository-library-list">
+        {changed.length > 0 && (
+          <>
+            <SectionHeader
+              title="Changes"
+              count={changed.length}
+              collapsed={collapsed}
+              className="changes"
+            />
+            {changed.map(repo => (
+              <LibraryItem
+                key={`changes-${repo.hash}`}
+                repository={repo}
+                selected={repo.hash === selectedHash}
+                changed={false}
+                changeCount={changeCountOf(repo)}
+                collapsed={collapsed}
+                onSelect={props.onSelect}
+              />
+            ))}
+            <SectionHeader
+              title="All repositories"
+              count={visible.length}
+              collapsed={collapsed}
+              className="all"
+            />
+          </>
+        )}
         {visible.map(repo => (
           <LibraryItem
             key={repo.hash}
             repository={repo}
             selected={repo.hash === selectedHash}
-            changed={
-              repo instanceof Repository &&
-              (props.localRepositoryStateLookup.get(repo.id)
-                ?.changedFilesCount ?? 0) > 0
-            }
+            changed={changeCountOf(repo) > 0}
+            changeCount={null}
             collapsed={collapsed}
             onSelect={props.onSelect}
           />
@@ -113,16 +153,43 @@ export function RepositoryLibrary(props: IRepositoryLibraryProps) {
   )
 }
 
+interface ISectionHeaderProps {
+  readonly title: string
+  readonly count: number
+  readonly collapsed: boolean
+  readonly className: string
+}
+
+function SectionHeader(props: ISectionHeaderProps) {
+  // The collapsed strip has no room for text; a divider keeps the sections
+  // apart there.
+  return (
+    <li
+      className={classNames('repository-library-section', props.className)}
+      role="presentation"
+    >
+      {!props.collapsed && (
+        <>
+          <span className="title">{props.title}</span>
+          <span className="count">{props.count}</span>
+        </>
+      )}
+    </li>
+  )
+}
+
 interface ILibraryItemProps {
   readonly repository: LibraryRepository
   readonly selected: boolean
   readonly changed: boolean
+  /** Changed-file count badge, shown in the Changes section only. */
+  readonly changeCount: number | null
   readonly collapsed: boolean
   readonly onSelect: (repository: LibraryRepository) => void
 }
 
 const LibraryItem = React.memo(function LibraryItem(props: ILibraryItemProps) {
-  const { repository, selected, changed, collapsed } = props
+  const { repository, selected, changed, changeCount, collapsed } = props
   const cloning = repository instanceof CloningRepository
   // A cloning repo's folder is half-written; don't scan it yet.
   const icon = useRepositoryIcon(cloning ? '' : repository.path)
@@ -162,6 +229,17 @@ const LibraryItem = React.memo(function LibraryItem(props: ILibraryItemProps) {
             <span className="name">{name}</span>
             {owner !== null && <span className="owner">{owner}</span>}
           </span>
+        )}
+        {changeCount !== null && (
+          <TooltippedContent
+            tagName="span"
+            className="repository-library-badge"
+            tooltip={`${changeCount} changed ${
+              changeCount === 1 ? 'file' : 'files'
+            }`}
+          >
+            {changeCount}
+          </TooltippedContent>
         )}
       </button>
     </li>

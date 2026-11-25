@@ -366,6 +366,15 @@ export interface IAppState {
    */
   readonly cloneAllProgress: ICloneAllProgress | null
 
+  /**
+   * The startup "download new repositories" pass, shown as an overlay card.
+   * Null when the pass isn't running and its result has been dismissed.
+   */
+  readonly newRepositoryScan: INewRepositoryScan | null
+
+  /** Kintsugi "Red alert!" bulk commit-and-push run; null when hidden. */
+  readonly redAlert: IRedAlertRun | null
+
   /** Whether the right-hand repository library is collapsed to an icon strip. */
   readonly isRepositoryLibraryCollapsed: boolean
 
@@ -1241,4 +1250,64 @@ export interface ICloneAllProgress {
   readonly cloned: number
   readonly skipped: number
   readonly failed: number
+}
+
+/** One repository found by the startup new-repository pass. */
+export interface INewRepositoryScanItem {
+  readonly name: string
+  readonly status: 'pending' | 'downloading' | 'done' | 'failed'
+  /** Clone progress of this repository, 0 to 1. */
+  readonly progress: number
+}
+
+/** State of the startup pass that downloads newly created repositories. */
+export interface INewRepositoryScan {
+  /**
+   * checking: asking GitHub for the owned repository list.
+   * downloading: cloning the new ones.
+   * done: finished with at least one new repository.
+   * up-to-date: finished, nothing new.
+   */
+  readonly phase: 'checking' | 'downloading' | 'done' | 'up-to-date'
+  readonly items: ReadonlyArray<INewRepositoryScanItem>
+  /** Folder new repositories are cloned into. */
+  readonly directory: string
+}
+
+/**
+ * One repository in a Red alert run.
+ * pending: waiting for a worker.
+ * writing: generating the commit message.
+ * committing / pushing: running git.
+ * done: committed and pushed.
+ * committed: committed, but there was no remote to push to.
+ * skipped: left untouched (merge in progress, detached HEAD, huge file…).
+ * failed: something went wrong; `detail` says what.
+ */
+export type RedAlertItemStatus =
+  | 'pending'
+  | 'writing'
+  | 'committing'
+  | 'pushing'
+  | 'done'
+  | 'committed'
+  | 'skipped'
+  | 'failed'
+
+export interface IRedAlertItem {
+  readonly name: string
+  readonly status: RedAlertItemStatus
+  /** Commit summary when finished, the reason when skipped or failed. */
+  readonly detail: string | null
+}
+
+/** State of a Kintsugi "Red alert!" bulk commit-and-push run. */
+export interface IRedAlertRun {
+  /**
+   * scanning: looking for repositories with uncommitted changes.
+   * running: committing and pushing them.
+   * done: finished (items may be empty when nothing needed committing).
+   */
+  readonly phase: 'scanning' | 'running' | 'done'
+  readonly items: ReadonlyArray<IRedAlertItem>
 }

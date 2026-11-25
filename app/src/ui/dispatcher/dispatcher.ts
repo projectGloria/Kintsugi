@@ -2954,6 +2954,32 @@ export class Dispatcher {
     return this.appStore._cloneAllRepositories(directory)
   }
 
+  /**
+   * Download owned repositories created since Kintsugi last looked, showing
+   * the new-repository progress card.
+   */
+  public downloadNewRepositories(): Promise<void> {
+    return this.appStore._downloadNewRepositories()
+  }
+
+  /** Hide the finished new-repository progress card. */
+  public dismissNewRepositoryScan() {
+    this.appStore._dismissNewRepositoryScan()
+  }
+
+  /**
+   * Kintsugi "Red alert!": commit every repository with uncommitted changes
+   * using a generated message, then push each one.
+   */
+  public redAlert(): Promise<void> {
+    return this.appStore._redAlert()
+  }
+
+  /** Hide the finished Red alert card. */
+  public dismissRedAlert() {
+    this.appStore._dismissRedAlert()
+  }
+
   /** Collapse/expand the right-hand repository library. */
   public toggleRepositoryLibrary() {
     this.appStore._toggleRepositoryLibrary()

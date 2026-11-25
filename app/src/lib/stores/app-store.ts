@@ -155,6 +155,8 @@ import {
   FoldoutType,
   IAppState,
   ICloneAllProgress,
+  INewRepositoryScan,
+  IRedAlertRun,
   ICompareBranch,
   ICompareFormUpdate,
   ICompareToBranch,
@@ -184,6 +186,13 @@ import {
 import { assertNever, fatalError, forceUnwrap } from '../fatal-error'
 
 import { formatCommitMessage } from '../format-commit-message'
+import {
+  compactDiffForCommitMessage,
+  fallbackCommitMessage,
+  RedAlertDiffBudgets,
+} from '../compact-commit-diff'
+import { CopilotError } from '../copilot-error'
+import { getLargeFilePaths } from '../large-files'
 import {
   getAccountForCommitMessageGeneration,
   getAccountForCopilotConflictResolution,
@@ -242,6 +251,7 @@ import {
   getRemoteURL,
   getGlobalConfigPath,
   getFilesDiffText,
+  getStatus,
   TerminalOutput,
   HookProgress,
   git,
@@ -597,6 +607,42 @@ const selectedCopilotModelsByAccountKey = 'selected-copilot-models-by-account'
 export const showChangesFilterDefault = true
 
 const repositoryLibraryCollapsedKey = 'kintsugi-library-collapsed'
+/** Folder the last "Clone all repositories" batch cloned into. */
+const cloneAllDirectoryKey = 'kintsugi-clone-all-directory'
+/**
+ * Normalized clone URLs of every owned repository Kintsugi has already seen,
+ * so the startup pass only downloads repositories created since then (and
+ * doesn't re-clone one the user deliberately removed).
+ */
+const knownOwnedRepositoriesKey = 'kintsugi-known-owned-repositories'
+
+/**
+ * Normalize clone URLs so https://github.com/A/b.git and
+ * https://github.com/a/b compare equal.
+ */
+const normalizeCloneUrl = (url: string) =>
+  url
+    .trim()
+    .toLowerCase()
+    .replace(/\.git$/, '')
+    .replace(/\/+$/, '')
+
+/** Mutable bookkeeping behind INewRepositoryScanItem. */
+interface INewRepositoryScanEntry {
+  readonly name: string
+  status: 'pending' | 'downloading' | 'done' | 'failed'
+  cloning: CloningRepository | null
+}
+
+interface IRedAlertEntry {
+  readonly name: string
+  status: IRedAlertRun['items'][number]['status']
+  detail: string | null
+}
+
+/** First line of an error's message, for one-line status rows. */
+const errorSummary = (e: unknown) =>
+  (e instanceof Error ? e.message : String(e)).split('\n')[0].trim()
 
 export class AppStore extends TypedBaseStore<IAppState> {
   private readonly gitStoreCache: GitStoreCache
@@ -736,6 +782,29 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
   /** Counters for the running clone-all batch, null when idle. */
   private cloneAllProgress: ICloneAllProgress | null = null
+
+  /** In-flight startup "download new repositories" pass. */
+  private newRepositoryScanPromise: Promise<void> | null = null
+
+  /** What the new-repository card shows; null when hidden. */
+  private newRepositoryScan: {
+    phase: INewRepositoryScan['phase']
+    readonly directory: string
+    items: ReadonlyArray<INewRepositoryScanEntry>
+  } | null = null
+
+  private newRepositoryScanDismissTimer: number | null = null
+
+  /** In-flight Kintsugi "Red alert!" bulk commit-and-push run. */
+  private redAlertPromise: Promise<void> | null = null
+
+  /** What the Red alert card shows; null when hidden. */
+  private redAlert: {
+    phase: IRedAlertRun['phase']
+    items: Array<IRedAlertEntry>
+  } | null = null
+
+  private redAlertDismissTimer: number | null = null
 
   /** Persisted UI preference; read once at startup, written on toggle. */
   private isRepositoryLibraryCollapsed =
@@ -1357,6 +1426,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
       repositoryIndicatorsEnabled: this.repositoryIndicatorsEnabled,
       isCheckingAllRepositories: this.checkAllRepositoriesPromise !== null,
       cloneAllProgress: this.cloneAllProgress,
+      newRepositoryScan: this.getNewRepositoryScanState(),
+      redAlert: this.getRedAlertState(),
       isRepositoryLibraryCollapsed: this.isRepositoryLibraryCollapsed,
       commitSpellcheckEnabled: this.commitSpellcheckEnabled,
       currentDragElement: this.currentDragElement,
@@ -4337,39 +4408,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
       return this.cloneAllRepositoriesPromise
     }
 
+    localStorage.setItem(cloneAllDirectoryKey, directory)
+
     const run = async () => {
-      // Normalize clone URLs so https://github.com/A/b.git and
-      // https://github.com/a/b compare equal.
-      const normalize = (url: string) =>
-        url
-          .trim()
-          .toLowerCase()
-          .replace(/\.git$/, '')
-          .replace(/\/+$/, '')
-
-      const tracked = new Set<string>()
-      const trackedPaths = new Set<string>()
-      for (const repo of this.repositories) {
-        trackedPaths.add(Path.resolve(repo.path).toLowerCase())
-        const url = repo.gitHubRepository?.cloneURL
-        if (url) {
-          tracked.add(normalize(url))
-        }
-      }
-
-      // Owned-only: the API list also contains collaborator and org repos,
-      // which "every repo that I have" doesn't mean.
-      const owned = new Map<string, IAPIRepository>()
-      for (const account of this.accounts) {
-        await this.apiRepositoriesStore.loadRepositories(account)
-        const state = this.apiRepositoriesStore.getState().get(account)
-        const login = account.login.toLowerCase()
-        for (const repo of state?.repositories ?? []) {
-          if (repo.owner.login.toLowerCase() === login) {
-            owned.set(normalize(repo.clone_url), repo)
-          }
-        }
-      }
+      const { tracked, trackedPaths } = this.getTrackedCloneTargets()
+      const owned = await this.loadOwnedRepositories()
 
       let cloned = 0
       let skipped = 0
@@ -4432,6 +4475,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
         Array.from({ length: Math.min(2, queue.length) }, worker)
       )
 
+      // Everything owned has now been offered once; the startup pass should
+      // only pick up repositories created after this batch.
+      this.rememberOwnedRepositories(owned.keys(), new Set())
+
       this._setBanner({
         type: BannerType.KintsugiCloneAllComplete,
         cloned,
@@ -4447,6 +4494,287 @@ export class AppStore extends TypedBaseStore<IAppState> {
     })
     this.emitUpdate()
     return this.cloneAllRepositoriesPromise
+  }
+
+  /** Clone URLs and folders of the repositories already in Kintsugi. */
+  private getTrackedCloneTargets() {
+    const tracked = new Set<string>()
+    const trackedPaths = new Set<string>()
+    for (const repo of this.repositories) {
+      trackedPaths.add(Path.resolve(repo.path).toLowerCase())
+      const url = repo.gitHubRepository?.cloneURL
+      if (url) {
+        tracked.add(normalizeCloneUrl(url))
+      }
+    }
+    return { tracked, trackedPaths }
+  }
+
+  /**
+   * Repositories owned by the signed-in account(s), keyed by normalized clone
+   * URL. Owned-only: the API list also contains collaborator and org repos,
+   * which "every repo that I have" doesn't mean.
+   */
+  private async loadOwnedRepositories() {
+    const owned = new Map<string, IAPIRepository>()
+    for (const account of this.accounts) {
+      await this.apiRepositoriesStore.loadRepositories(account)
+      const state = this.apiRepositoriesStore.getState().get(account)
+      const login = account.login.toLowerCase()
+      for (const repo of state?.repositories ?? []) {
+        if (repo.owner.login.toLowerCase() === login) {
+          owned.set(normalizeCloneUrl(repo.clone_url), repo)
+        }
+      }
+    }
+    return owned
+  }
+
+  /** The known-owned set, or null if no batch has recorded one yet. */
+  private readKnownOwnedRepositories(): Set<string> | null {
+    const raw = localStorage.getItem(knownOwnedRepositoriesKey)
+    if (raw === null) {
+      return null
+    }
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      return Array.isArray(parsed)
+        ? new Set(parsed.filter((u): u is string => typeof u === 'string'))
+        : null
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Mark owned repositories as seen. Failed ones are left out so the next
+   * launch retries them.
+   */
+  private rememberOwnedRepositories(
+    urls: Iterable<string>,
+    failed: ReadonlySet<string>
+  ) {
+    const known = this.readKnownOwnedRepositories() ?? new Set<string>()
+    for (const url of urls) {
+      if (!failed.has(url)) {
+        known.add(url)
+      }
+    }
+    for (const url of failed) {
+      known.delete(url)
+    }
+    localStorage.setItem(knownOwnedRepositoriesKey, JSON.stringify([...known]))
+  }
+
+  /**
+   * Where new repositories go: the last Clone all folder, else the last clone
+   * location, else the folder most tracked repositories live in.
+   */
+  private resolveNewRepositoryDirectory(): string | null {
+    const saved =
+      localStorage.getItem(cloneAllDirectoryKey) ||
+      localStorage.getItem('last-clone-location')
+    if (saved) {
+      return saved
+    }
+    const counts = new Map<string, { path: string; count: number }>()
+    for (const repo of this.repositories) {
+      const parent = Path.dirname(Path.resolve(repo.path))
+      const key = parent.toLowerCase()
+      const entry = counts.get(key) ?? { path: parent, count: 0 }
+      counts.set(key, { path: entry.path, count: entry.count + 1 })
+    }
+    let best: { path: string; count: number } | null = null
+    for (const entry of counts.values()) {
+      if (best === null || entry.count > best.count) {
+        best = entry
+      }
+    }
+    return best?.path ?? null
+  }
+
+  private getNewRepositoryScanState(): INewRepositoryScan | null {
+    const sync = this.newRepositoryScan
+    if (sync === null) {
+      return null
+    }
+    return {
+      phase: sync.phase,
+      directory: sync.directory,
+      items: sync.items.map(item => ({
+        name: item.name,
+        status: item.status,
+        progress:
+          item.status === 'done' || item.status === 'failed'
+            ? 1
+            : item.cloning !== null
+            ? this.cloningRepositoriesStore.getRepositoryState(item.cloning)
+                ?.value ?? 0
+            : 0,
+      })),
+    }
+  }
+
+  private scheduleNewRepositoryScanDismiss(delay: number) {
+    if (this.newRepositoryScanDismissTimer !== null) {
+      window.clearTimeout(this.newRepositoryScanDismissTimer)
+    }
+    this.newRepositoryScanDismissTimer = window.setTimeout(() => {
+      this.newRepositoryScanDismissTimer = null
+      this._dismissNewRepositoryScan()
+    }, delay)
+  }
+
+  /** This shouldn't be called directly. See `Dispatcher`. */
+  public _dismissNewRepositoryScan() {
+    const sync = this.newRepositoryScan
+    if (
+      sync === null ||
+      sync.phase === 'checking' ||
+      sync.phase === 'downloading'
+    ) {
+      return
+    }
+    if (this.newRepositoryScanDismissTimer !== null) {
+      window.clearTimeout(this.newRepositoryScanDismissTimer)
+      this.newRepositoryScanDismissTimer = null
+    }
+    this.newRepositoryScan = null
+    this.emitUpdate()
+  }
+
+  /**
+   * Kintsugi startup pass: download owned repositories created since the
+   * last time Kintsugi looked, into the Clone all folder, with an on-screen
+   * progress card. Skips silently when signed out or while Clone all runs.
+   *
+   * This shouldn't be called directly. See `Dispatcher`.
+   */
+  public _downloadNewRepositories(): Promise<void> {
+    if (this.newRepositoryScanPromise !== null) {
+      return this.newRepositoryScanPromise
+    }
+    if (
+      this.accounts.length === 0 ||
+      this.cloneAllRepositoriesPromise !== null
+    ) {
+      return Promise.resolve()
+    }
+    const directory = this.resolveNewRepositoryDirectory()
+    if (directory === null) {
+      return Promise.resolve()
+    }
+
+    const run = async () => {
+      const sync: {
+        phase: INewRepositoryScan['phase']
+        readonly directory: string
+        items: ReadonlyArray<INewRepositoryScanEntry>
+      } = { phase: 'checking', directory, items: [] }
+      this.newRepositoryScan = sync
+      this.emitUpdate()
+
+      let owned: Map<string, IAPIRepository>
+      try {
+        owned = await this.loadOwnedRepositories()
+      } catch (e) {
+        log.warn('[NewRepositories] Could not list owned repositories', e)
+        this.newRepositoryScan = null
+        return
+      }
+      if (owned.size === 0) {
+        // Offline or the API failed: don't record an empty "known" list.
+        this.newRepositoryScan = null
+        return
+      }
+
+      const known = this.readKnownOwnedRepositories()
+      const { tracked, trackedPaths } = this.getTrackedCloneTargets()
+      const queue = new Array<{
+        url: string
+        repo: IAPIRepository
+        path: string
+        entry: INewRepositoryScanEntry
+      }>()
+      const plannedPaths = new Set<string>()
+      for (const [url, repo] of owned) {
+        if (known?.has(url) || tracked.has(url)) {
+          continue
+        }
+        let path = Path.join(directory, repo.name)
+        if (plannedPaths.has(path.toLowerCase())) {
+          path = Path.join(directory, `${repo.owner.login}-${repo.name}`)
+        }
+        if (
+          trackedPaths.has(Path.resolve(path).toLowerCase()) ||
+          (await pathExists(path))
+        ) {
+          continue
+        }
+        plannedPaths.add(path.toLowerCase())
+        const entry: INewRepositoryScanEntry = {
+          name: repo.name,
+          status: 'pending',
+          cloning: null,
+        }
+        queue.push({ url, repo, path, entry })
+      }
+
+      const failed = new Set<string>()
+      if (queue.length === 0) {
+        sync.phase = 'up-to-date'
+      } else {
+        sync.items = queue.map(q => q.entry)
+        sync.phase = 'downloading'
+        this.emitUpdate()
+
+        // Same two-at-a-time limit as Clone all.
+        const pending = [...queue]
+        const worker = async () => {
+          for (let item = pending.shift(); item; item = pending.shift()) {
+            const { url, repo, path, entry } = item
+            entry.status = 'downloading'
+            try {
+              const { promise, repository } = this._clone(
+                repo.clone_url,
+                path,
+                { defaultBranch: repo.default_branch }
+              )
+              entry.cloning = repository
+              this.emitUpdate()
+              const success = await promise
+              entry.status =
+                success && (await this._addRepositories([path])).length > 0
+                  ? 'done'
+                  : 'failed'
+            } catch (e) {
+              log.warn(`[NewRepositories] Failed to clone ${repo.clone_url}`, e)
+              entry.status = 'failed'
+            }
+            entry.cloning = null
+            if (entry.status === 'failed') {
+              failed.add(url)
+            }
+            this.emitUpdate()
+          }
+        }
+        await Promise.all(
+          Array.from({ length: Math.min(2, pending.length) }, worker)
+        )
+        sync.phase = 'done'
+      }
+
+      this.rememberOwnedRepositories(owned.keys(), failed)
+      this.scheduleNewRepositoryScanDismiss(
+        sync.phase === 'up-to-date' ? 2500 : failed.size > 0 ? 10000 : 6000
+      )
+    }
+
+    this.newRepositoryScanPromise = run().finally(() => {
+      this.newRepositoryScanPromise = null
+      this.emitUpdate()
+    })
+    return this.newRepositoryScanPromise
   }
 
   private getRepositoriesForIndicatorRefresh = () => {
@@ -6633,6 +6961,351 @@ export class AppStore extends TypedBaseStore<IAppState> {
     )
   }
 
+  /**
+   * Ask Copilot for a commit message for `diff`, through the same backend
+   * the "Generate commit message" button uses.
+   */
+  private async requestCommitMessage(
+    account: Account,
+    repository: Repository,
+    diff: string,
+    signal?: AbortSignal
+  ) {
+    return enableCopilotSdkCommitMessageGeneration(account)
+      ? this.copilotStore.generateCommitMessage(
+          account,
+          diff,
+          repository.path,
+          await this.resolveCopilotModelRequest(
+            this.getSelectedCopilotModels(account)[
+              'commit-message-generation'
+            ] ?? null
+          ),
+          this.repositoryStateCache
+            .get(repository)
+            ?.changesState.currentRepoRulesInfo?.commitMessagePatterns.getRules() ??
+            [],
+          signal
+        )
+      : API.fromAccount(account).getDiffChangesCommitMessage(diff)
+  }
+
+  /**
+   * Commit message for a Red alert commit: Copilot on a diff shrunk to fit
+   * (retrying smaller when Copilot rejects it), else one built from the file
+   * list. Never throws.
+   */
+  private async writeRedAlertCommitMessage(
+    repository: Repository,
+    files: ReadonlyArray<WorkingDirectoryFileChange>,
+    copilot: { usable: boolean }
+  ): Promise<{ readonly summary: string; readonly description: string }> {
+    const account = getAccountForCommitMessageGeneration(
+      this.accounts,
+      repository
+    )
+    if (account === undefined || !copilot.usable) {
+      return fallbackCommitMessage(files)
+    }
+
+    let diff: string
+    try {
+      diff = await getFilesDiffText(repository, files)
+    } catch (e) {
+      // Over git's 10 MB cap: describe the files instead of their content.
+      log.warn(`[RedAlert] Full diff unavailable for ${repository.path}`, e)
+      diff = files
+        .map(f => `diff --git a/${f.path} b/${f.path}\n(large change)\n`)
+        .join('')
+    }
+    if (diff.trim().length === 0) {
+      return fallbackCommitMessage(files)
+    }
+
+    for (const budget of RedAlertDiffBudgets) {
+      try {
+        const response = await this.requestCommitMessage(
+          account,
+          repository,
+          compactDiffForCommitMessage(diff, budget)
+        )
+        const summary = response.title.trim()
+        if (summary.length > 0) {
+          return { summary, description: response.description.trim() }
+        }
+      } catch (e) {
+        log.warn(
+          `[RedAlert] Copilot failed for ${repository.path} at ${budget} chars`,
+          e
+        )
+        // Quota, billing, auth and rate limits won't get better with a
+        // smaller diff: stop asking Copilot for the rest of this run.
+        if (
+          e instanceof CopilotError &&
+          (e.isPaymentRequiredError ||
+            /^(Unauthorized|Rate limited)/.test(e.message))
+        ) {
+          copilot.usable = false
+          break
+        }
+      }
+    }
+    return fallbackCommitMessage(files)
+  }
+
+  private getRedAlertState(): IRedAlertRun | null {
+    const run = this.redAlert
+    return run === null
+      ? null
+      : { phase: run.phase, items: run.items.map(item => ({ ...item })) }
+  }
+
+  /** This shouldn't be called directly. See `Dispatcher`. */
+  public _dismissRedAlert() {
+    if (this.redAlert === null || this.redAlert.phase !== 'done') {
+      return
+    }
+    if (this.redAlertDismissTimer !== null) {
+      window.clearTimeout(this.redAlertDismissTimer)
+      this.redAlertDismissTimer = null
+    }
+    this.redAlert = null
+    this.emitUpdate()
+  }
+
+  /**
+   * Commit and push one repository for Red alert, updating `entry` as it
+   * goes. Never throws; failures land in `entry`.
+   */
+  private async redAlertRepository(
+    repository: Repository,
+    files: ReadonlyArray<WorkingDirectoryFileChange>,
+    branch: string,
+    upstream: string | undefined,
+    entry: IRedAlertEntry,
+    copilot: { usable: boolean }
+  ) {
+    const update = (
+      status: IRedAlertEntry['status'],
+      detail: string | null = entry.detail
+    ) => {
+      entry.status = status
+      entry.detail = detail
+      this.emitUpdate()
+    }
+
+    // GitHub refuses pushes containing files over 100 MB; committing them
+    // would leave the repository stuck with an unpushable commit.
+    const large = await getLargeFilePaths(
+      repository,
+      WorkingDirectoryStatus.fromFiles(files)
+    )
+    if (large.length > 0) {
+      update('skipped', `Over 100 MB: ${large[0]}`)
+      return
+    }
+
+    update('writing')
+    const message = await this.writeRedAlertCommitMessage(
+      repository,
+      files,
+      copilot
+    )
+
+    update('committing', message.summary)
+    try {
+      await createCommit(
+        repository,
+        message.description.length > 0
+          ? `${message.summary}\n\n${message.description}\n`
+          : `${message.summary}\n`,
+        files
+      )
+    } catch (e) {
+      log.warn(`[RedAlert] Commit failed in ${repository.path}`, e)
+      update('failed', `Commit failed: ${errorSummary(e)}`)
+      return
+    }
+
+    const remotes = await getRemotes(repository).catch(() => [])
+    // Push where the branch already tracks; otherwise to origin (or the only
+    // remote) with --set-upstream.
+    const slash = upstream?.indexOf('/') ?? -1
+    const upstreamRemote =
+      upstream !== undefined && slash > 0
+        ? remotes.find(r => r.name === upstream.substring(0, slash))
+        : undefined
+    const remote =
+      upstreamRemote ??
+      remotes.find(r => r.name === 'origin') ??
+      (remotes.length === 1 ? remotes[0] : undefined)
+    if (remote === undefined) {
+      update('committed')
+      return
+    }
+
+    update('pushing')
+    try {
+      await pushRepo(
+        repository,
+        remote,
+        branch,
+        upstreamRemote !== undefined && upstream !== undefined
+          ? upstream.substring(slash + 1)
+          : null,
+        null
+      )
+      update('done')
+    } catch (e) {
+      log.warn(`[RedAlert] Push failed in ${repository.path}`, e)
+      update(
+        'failed',
+        /\[rejected\]|non-fast-forward|fetch first|updated since you last pulled/i.test(
+          errorSummary(e)
+        )
+          ? 'Committed; push rejected, the remote has new commits (pull first)'
+          : `Committed; push failed: ${errorSummary(e)}`
+      )
+    }
+  }
+
+  /**
+   * Kintsugi "Red alert!": for every repository with uncommitted changes,
+   * write a commit message (Copilot, shrinking the diff automatically when
+   * it's too long), commit everything, and push. Repositories mid-merge,
+   * mid-rebase or on a detached HEAD are skipped, never forced.
+   *
+   * This shouldn't be called directly. See `Dispatcher`.
+   */
+  public _redAlert(): Promise<void> {
+    if (this.redAlertPromise !== null) {
+      return this.redAlertPromise
+    }
+    if (this.redAlertDismissTimer !== null) {
+      window.clearTimeout(this.redAlertDismissTimer)
+      this.redAlertDismissTimer = null
+    }
+
+    const run = async () => {
+      const state: {
+        phase: IRedAlertRun['phase']
+        items: Array<IRedAlertEntry>
+      } = { phase: 'scanning', items: [] }
+      this.redAlert = state
+
+      // Find what needs committing, four `git status` at a time.
+      const jobs = new Array<{
+        repository: Repository
+        files: ReadonlyArray<WorkingDirectoryFileChange>
+        branch: string
+        upstream: string | undefined
+        entry: IRedAlertEntry
+      }>()
+      const scanQueue = this.repositories.filter(r => !r.missing)
+      const scan = async () => {
+        for (let repo = scanQueue.shift(); repo; repo = scanQueue.shift()) {
+          const status = await getStatus(repo).catch(() => null)
+          if (status === null || !status.exists) {
+            continue
+          }
+          const files = status.workingDirectory.files.filter(
+            f => f.selection.getSelectionType() !== DiffSelectionType.None
+          )
+          if (files.length === 0) {
+            continue
+          }
+          const entry: IRedAlertEntry = {
+            name: repo.alias ?? repo.name,
+            status: 'pending',
+            detail: null,
+          }
+          state.items.push(entry)
+          if (
+            status.mergeHeadFound ||
+            status.squashMsgFound ||
+            status.rebaseInternalState !== null ||
+            status.isCherryPickingHeadFound ||
+            status.doConflictedFilesExist
+          ) {
+            entry.status = 'skipped'
+            entry.detail = 'Merge, rebase or conflict in progress'
+          } else if (status.currentBranch === undefined) {
+            entry.status = 'skipped'
+            entry.detail = 'Detached HEAD'
+          } else {
+            jobs.push({
+              repository: repo,
+              files,
+              branch: status.currentBranch,
+              upstream: status.currentUpstreamBranch,
+              entry,
+            })
+          }
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(4, scanQueue.length) }, scan)
+      )
+      state.items.sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+      )
+
+      state.phase = 'running'
+      this.emitUpdate()
+
+      // Two repositories at a time: Copilot and pushes are network-bound.
+      const copilot = { usable: true }
+      const work = async () => {
+        for (let job = jobs.shift(); job; job = jobs.shift()) {
+          const { repository, files, branch, upstream, entry } = job
+          await this.redAlertRepository(
+            repository,
+            files,
+            branch,
+            upstream,
+            entry,
+            copilot
+          )
+          // Bring the sidebar, library badges and (if open) the Changes
+          // list up to date with the new commit.
+          await this.refreshChangesIndicatorForRepository(repository).catch(
+            () => null
+          )
+          if (this.selectedRepository === repository) {
+            await this._refreshRepository(repository).catch(() => undefined)
+          }
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(2, jobs.length) }, work))
+
+      state.phase = 'done'
+      // Leave failures on screen until dismissed; clean runs fade away.
+      if (!state.items.some(i => i.status === 'failed')) {
+        this.redAlertDismissTimer = window.setTimeout(
+          () => {
+            this.redAlertDismissTimer = null
+            this._dismissRedAlert()
+          },
+          state.items.length === 0 ? 3000 : 8000
+        )
+      }
+    }
+
+    this.redAlertPromise = run()
+      .catch(e => {
+        log.error('[RedAlert] Run failed', e)
+        if (this.redAlert !== null) {
+          this.redAlert.phase = 'done'
+        }
+      })
+      .finally(() => {
+        this.redAlertPromise = null
+        this.emitUpdate()
+      })
+    this.emitUpdate()
+    return this.redAlertPromise
+  }
+
   public async _generateCommitMessage(
     repository: Repository,
     filesSelected: ReadonlyArray<WorkingDirectoryFileChange>
@@ -6677,23 +7350,12 @@ export class AppStore extends TypedBaseStore<IAppState> {
           return false
         }
 
-        const response = enableCopilotSdkCommitMessageGeneration(account)
-          ? await this.copilotStore.generateCommitMessage(
-              account,
-              diff,
-              repository.path,
-              await this.resolveCopilotModelRequest(
-                this.getSelectedCopilotModels(account)[
-                  'commit-message-generation'
-                ] ?? null
-              ),
-              this.repositoryStateCache
-                .get(repository)
-                ?.changesState.currentRepoRulesInfo?.commitMessagePatterns.getRules() ??
-                [],
-              signal
-            )
-          : await API.fromAccount(account).getDiffChangesCommitMessage(diff)
+        const response = await this.requestCommitMessage(
+          account,
+          repository,
+          diff,
+          signal
+        )
 
         this._setCommitMessage(repository, {
           summary: response.title,

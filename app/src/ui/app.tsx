@@ -58,6 +58,8 @@ import {
   RevertProgress,
 } from './toolbar'
 import { KintsugiMenu } from './window/kintsugi-menu'
+import { NewRepositoryCard } from './window/new-repository-card'
+import { RedAlertCard } from './window/red-alert-card'
 import { RepositoryLibrary } from './repository-library'
 import { iconForRepository, OcticonSymbol } from './octicons'
 import * as octicons from './octicons/octicons.generated'
@@ -396,6 +398,9 @@ export class App extends React.Component<IAppProps, IAppState> {
     setInterval(() => this.props.dispatcher.reportStats(), SendStatsInterval)
 
     this.props.dispatcher.installGlobalLFSFilters(false)
+
+    // Kintsugi: pick up repositories created on GitHub since the last launch.
+    this.props.dispatcher.downloadNewRepositories()
 
     // We only want to automatically check for updates on beta and prod
     if (
@@ -1506,6 +1511,10 @@ export class App extends React.Component<IAppProps, IAppState> {
             isCheckingAllRepositories={this.state.isCheckingAllRepositories}
             cloneAllProgress={this.state.cloneAllProgress}
             dirtyCount={this.countDirtyRepositories()}
+            isRedAlertRunning={
+              this.state.redAlert !== null &&
+              this.state.redAlert.phase !== 'done'
+            }
           />
         )}
       </TitleBar>
@@ -3391,9 +3400,41 @@ export class App extends React.Component<IAppProps, IAppState> {
           {this.renderRepository()}
           {this.renderRepositoryLibrary()}
         </div>
+        <div className="kintsugi-cards">
+          {this.renderRedAlertCard()}
+          {this.renderNewRepositoryCard()}
+        </div>
         {this.renderPopups()}
         {this.renderDragElement()}
       </div>
+    )
+  }
+
+  private onDismissRedAlertCard = () => {
+    this.props.dispatcher.dismissRedAlert()
+  }
+
+  private renderRedAlertCard() {
+    const run = this.state.redAlert
+    return run === null ? null : (
+      <RedAlertCard run={run} onDismiss={this.onDismissRedAlertCard} />
+    )
+  }
+
+  private onDismissNewRepositoryCard = () => {
+    this.props.dispatcher.dismissNewRepositoryScan()
+  }
+
+  private renderNewRepositoryCard() {
+    const sync = this.state.newRepositoryScan
+    if (sync === null) {
+      return null
+    }
+    return (
+      <NewRepositoryCard
+        sync={sync}
+        onDismiss={this.onDismissNewRepositoryCard}
+      />
     )
   }
 

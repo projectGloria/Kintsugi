@@ -191,3 +191,66 @@
     font-size: var(--font-size-sm);
   }
 }
+
+// Section headers: "Changes" (repositories with something to commit) pinned
+// above "All repositories".
+.repository-library-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px 4px;
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary-color);
+
+  &:first-child {
+    padding-top: 2px;
+  }
+
+  &.changes .title {
+    color: #c15f3c;
+  }
+
+  .count {
+    padding: 0 5px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    font-weight: normal;
+    line-height: 16px;
+  }
+
+  &.all {
+    margin-top: 6px;
+    border-top: var(--base-border);
+  }
+
+  .repository-library.collapsed & {
+    padding: 0;
+    height: 0;
+
+    &.all {
+      margin: 6px 6px;
+    }
+  }
+}
+
+.repository-library-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: rgba(193, 95, 60, 0.22);
+  color: #e08a66;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+
+  .repository-library.collapsed & {
+    display: none;
+  }
+}
