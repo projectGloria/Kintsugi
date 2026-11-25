@@ -1,0 +1,421 @@
+// Kintsugi progress screen: one blocking view below the title bar for every
+// bulk process (locate/drop, Clone all, Check all, Red alert, new-repository
+// download). Gold by default, red for Red alert.
+.progress-screen {
+  --progress-accent: #c15f3c;
+  --progress-accent-soft: rgba(193, 95, 60, 0.16);
+  --progress-accent-line: rgba(193, 95, 60, 0.55);
+  --progress-fill: linear-gradient(90deg, #8a4127, #c15f3c, #d9a23b);
+
+  position: fixed;
+  top: calc(var(--win32-title-bar-height) + 1px);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(12, 11, 10, 0.72);
+  backdrop-filter: blur(3px);
+  user-select: none;
+  animation: progress-screen-fade 160ms ease-out;
+
+  &.tone-red {
+    --progress-accent: #e5534b;
+    --progress-accent-soft: rgba(217, 83, 79, 0.16);
+    --progress-accent-line: rgba(217, 83, 79, 0.65);
+    --progress-fill: linear-gradient(90deg, #7f1d1d, #e5534b, #f59e0b);
+  }
+
+  &.clean {
+    --progress-accent: #4e9a6e;
+    --progress-accent-soft: rgba(78, 154, 110, 0.15);
+    --progress-accent-line: rgba(78, 154, 110, 0.6);
+    --progress-fill: linear-gradient(90deg, #2f5f44, #4e9a6e);
+  }
+}
+
+@keyframes progress-screen-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes progress-screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.progress-screen-panel {
+  width: 560px;
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--progress-accent-line);
+  border-radius: 10px;
+  background: var(--box-background-color);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+  animation: progress-screen-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
+  transition: border-color 180ms;
+}
+
+.progress-screen-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px 12px;
+}
+
+.progress-screen-badge {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--progress-accent);
+  background: var(--progress-accent-soft);
+  transition: color 180ms, background-color 180ms;
+
+  .octicon {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+.progress-screen-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+
+  .title {
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .subtitle {
+    color: var(--text-secondary-color);
+    font-size: var(--font-size-sm);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+// The repository being worked on right now, big.
+.progress-screen-current {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 18px;
+  padding: 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+
+  &.empty .progress-screen-current-icon {
+    color: var(--progress-accent);
+    background: var(--progress-accent-soft);
+
+    .octicon {
+      width: 22px;
+      height: 22px;
+    }
+  }
+}
+
+.progress-screen-current-icon {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+
+  img {
+    max-width: 48px;
+    max-height: 48px;
+    object-fit: contain;
+    border-radius: 8px;
+  }
+
+  .monogram {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    font-size: 22px;
+  }
+}
+
+.progress-screen-current-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 1px;
+
+  .name {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .name,
+  .detail,
+  .path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .detail {
+    color: var(--text-color);
+    opacity: 0.85;
+  }
+
+  .path {
+    color: var(--text-secondary-color);
+    font-size: var(--font-size-xs, 11px);
+  }
+
+  .progress-screen-bar {
+    margin-top: 6px;
+    height: 4px;
+  }
+}
+
+.progress-screen-overall {
+  padding: 14px 18px 10px;
+}
+
+.progress-screen-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+
+  .fill {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--progress-fill);
+    transition: width 250ms ease-out;
+  }
+
+  &.indeterminate .fill {
+    position: absolute;
+    width: 35%;
+    animation: progress-screen-sweep 1.1s ease-in-out infinite;
+  }
+}
+
+@keyframes progress-screen-sweep {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+.progress-screen-stats {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  color: var(--text-secondary-color);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+
+  .skipped {
+    color: #d9a23b;
+  }
+
+  .failed {
+    color: #e5534b;
+  }
+
+  .percent {
+    margin-left: auto;
+    color: var(--text-color);
+    font-weight: 600;
+  }
+}
+
+// Every repository; scrolls inside the panel (themed thin scrollbars come
+// from the global _scroll.scss rules).
+.progress-screen-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 10px 4px 18px;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 8px 5px 0;
+    font-size: var(--font-size-sm);
+    border-radius: 6px;
+    transition: background-color 150ms, opacity 150ms;
+
+    &.status-pending {
+      opacity: 0.55;
+    }
+
+    &.status-working {
+      background: var(--progress-accent-soft);
+    }
+  }
+
+  .row-icon {
+    flex: 0 0 22px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 6px;
+
+    img {
+      max-width: 22px;
+      max-height: 22px;
+      object-fit: contain;
+      border-radius: 4px;
+    }
+
+    .monogram {
+      width: 22px;
+      height: 22px;
+      border-radius: 5px;
+      font-size: 11px;
+    }
+  }
+
+  .row-text {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .name,
+  .detail {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .name {
+    font-weight: 600;
+  }
+
+  .detail {
+    color: var(--text-secondary-color);
+  }
+
+  .row-progress {
+    flex: 0 0 90px;
+
+    .progress-screen-bar {
+      height: 4px;
+    }
+  }
+
+  .row-status {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    color: var(--text-secondary-color);
+  }
+
+  .status-working .row-status {
+    color: var(--progress-accent);
+  }
+
+  .status-done .row-status {
+    color: #4e9a6e;
+  }
+
+  .status-skipped .row-status {
+    color: #d9a23b;
+  }
+
+  .status-failed {
+    .row-status,
+    .detail {
+      color: #e5534b;
+    }
+  }
+}
+
+.progress-screen-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 18px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.progress-screen-button {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: none;
+  color: var(--text-color);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 150ms, border-color 150ms, color 150ms, transform 120ms;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.24);
+  }
+
+  &:active {
+    transform: translateY(1px);
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  &:focus-visible {
+    outline: none;
+    border-color: var(--progress-accent);
+    box-shadow: 0 0 0 2px var(--progress-accent-soft);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+    transform: none;
+  }
+
+  &.primary {
+    border-color: var(--progress-accent-line);
+    background: var(--progress-accent-soft);
+    color: var(--progress-accent);
+
+    &:hover {
+      border-color: var(--progress-accent);
+    }
+  }
+}

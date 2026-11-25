@@ -7,6 +7,7 @@ export type MenuEvent =
   | 'show-history'
   | 'toggle-repository-library'
   | 'add-local-repository'
+  | 'locate-existing-sources'
   | 'create-branch'
   | 'show-branches'
   | 'show-worktrees'

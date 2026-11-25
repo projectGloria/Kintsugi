@@ -33,6 +33,7 @@ export type MenuIDs =
   | 'remove-repository'
   | 'new-repository'
   | 'add-local-repository'
+  | 'locate-existing-sources'
   | 'clone-repository'
   | 'about'
   | 'create-pull-request'

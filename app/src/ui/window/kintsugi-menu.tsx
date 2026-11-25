@@ -1,22 +1,27 @@
 import * as React from 'react'
 import classNames from 'classnames'
 import { Dispatcher } from '../dispatcher'
-import { ICloneAllProgress } from '../../lib/app-state'
+import { IBulkJob, INewRepositoryScan, IRedAlertRun } from '../../lib/app-state'
 import { encodePathAsUrl } from '../../lib/path'
 import { showOpenDialog } from '../main-process-proxy'
 import { getDefaultDir, setDefaultDir } from '../lib/default-dir'
 import { clearRepositoryIconCache } from '../../lib/repository-icon'
 import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
+import { pickProgressScreen } from './progress-screen-model'
 
 interface IKintsugiMenuProps {
   readonly dispatcher: Dispatcher
   readonly hasAccounts: boolean
-  readonly isCheckingAllRepositories: boolean
-  readonly cloneAllProgress: ICloneAllProgress | null
+  readonly bulkJob: IBulkJob | null
+  readonly redAlert: IRedAlertRun | null
+  readonly newRepositoryScan: INewRepositoryScan | null
+  /** The progress screen was sent to the background. */
+  readonly isProgressScreenHidden: boolean
   /** Repositories with uncommitted changes (derived by the caller). */
   readonly dirtyCount: number
-  readonly isRedAlertRunning: boolean
+  /** Same flow as File → Locate existing sources. */
+  readonly onLocateExistingSources: () => void
 }
 
 /** How long the armed "click again" state of Red alert lasts. */
@@ -28,7 +33,12 @@ const RedAlertArmMs = 4000
  * popup menu so it can anchor under the button and show live progress.
  */
 export function KintsugiMenu(props: IKintsugiMenuProps) {
-  const { dispatcher, cloneAllProgress, isCheckingAllRepositories } = props
+  const { dispatcher, bulkJob, redAlert, newRepositoryScan } = props
+  // Whatever the progress screen shows (or would show while hidden).
+  const progress = pickProgressScreen({ redAlert, bulkJob, newRepositoryScan })
+  const busy = progress !== null && progress.phase !== 'done'
+  const isCheckingAllRepositories =
+    busy && bulkJob !== null && bulkJob.kind === 'check-all'
   const [open, setOpen] = React.useState(false)
   const rootRef = React.useRef<HTMLDivElement>(null)
 
@@ -114,18 +124,23 @@ export function KintsugiMenu(props: IKintsugiMenuProps) {
     dispatcher.redAlert()
   }, [armed, dispatcher])
 
-  const { isRedAlertRunning } = props
-  const busyLabel = isRedAlertRunning
-    ? 'Red alert…'
-    : cloneAllProgress !== null
-    ? `Cloning ${
-        cloneAllProgress.cloned +
-        cloneAllProgress.skipped +
-        cloneAllProgress.failed
-      }/${cloneAllProgress.total}`
-    : isCheckingAllRepositories
-    ? 'Checking…'
-    : null
+  const { onLocateExistingSources } = props
+  const onLocate = React.useCallback(() => {
+    setOpen(false)
+    onLocateExistingSources()
+  }, [onLocateExistingSources])
+
+  const onShowProgress = React.useCallback(() => {
+    setOpen(false)
+    dispatcher.setProgressScreenHidden(false)
+  }, [dispatcher])
+
+  const busyLabel =
+    progress === null || !busy
+      ? null
+      : progress.phase === 'preparing'
+      ? `${progress.label}…`
+      : `${progress.label} ${progress.finished}/${progress.rows.length}`
 
   const checkAllDescription = isCheckingAllRepositories
     ? 'Checking repositories…'
@@ -137,15 +152,14 @@ export function KintsugiMenu(props: IKintsugiMenuProps) {
 
   const cloneAllDescription = !props.hasAccounts
     ? 'Sign in to GitHub first'
-    : cloneAllProgress !== null
-    ? `${cloneAllProgress.cloned} cloned · ${cloneAllProgress.skipped} skipped · ${cloneAllProgress.failed} failed`
     : 'Every repository you own; existing ones are skipped'
 
-  const redAlertDescription = isRedAlertRunning
-    ? 'Committing and pushing…'
-    : armed
-    ? 'Click again to commit & push every changed repository'
-    : 'Commit every change with a generated message, then push'
+  const redAlertDescription =
+    busy && progress?.source === 'red-alert'
+      ? 'Committing and pushing…'
+      : armed
+      ? 'Click again to commit & push every changed repository'
+      : 'Commit every change with a generated message, then push'
 
   return (
     <div className="kintsugi-menu" ref={rootRef}>
@@ -169,11 +183,32 @@ export function KintsugiMenu(props: IKintsugiMenuProps) {
       </button>
       {open && (
         <div className="kintsugi-menu-dropdown" role="menu">
+          {progress !== null && props.isProgressScreenHidden && (
+            <>
+              <MenuItem
+                icon={octicons.pulse}
+                title="Show progress"
+                description={progress.title}
+                disabled={false}
+                spinning={false}
+                onClick={onShowProgress}
+              />
+              <div className="kintsugi-menu-separator" role="separator" />
+            </>
+          )}
+          <MenuItem
+            icon={octicons.fileDirectory}
+            title="Locate existing sources…"
+            description="Add repositories already on disk, or a folder of them"
+            disabled={busy}
+            spinning={false}
+            onClick={onLocate}
+          />
           <MenuItem
             icon={octicons.desktopDownload}
             title="Clone all repositories"
             description={cloneAllDescription}
-            disabled={cloneAllProgress !== null}
+            disabled={busy}
             spinning={false}
             onClick={onCloneAll}
           />
@@ -181,7 +216,7 @@ export function KintsugiMenu(props: IKintsugiMenuProps) {
             icon={octicons.sync}
             title="Check all"
             description={checkAllDescription}
-            disabled={isCheckingAllRepositories}
+            disabled={busy}
             spinning={isCheckingAllRepositories}
             onClick={onCheckAll}
           />
@@ -190,7 +225,7 @@ export function KintsugiMenu(props: IKintsugiMenuProps) {
             icon={octicons.alert}
             title={armed ? 'Red alert! Are you sure?' : 'Red alert!'}
             description={redAlertDescription}
-            disabled={isRedAlertRunning || cloneAllProgress !== null}
+            disabled={busy}
             spinning={false}
             className={classNames('red-alert', { armed })}
             onClick={onRedAlert}

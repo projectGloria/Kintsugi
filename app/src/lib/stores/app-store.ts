@@ -154,7 +154,8 @@ import {
   Foldout,
   FoldoutType,
   IAppState,
-  ICloneAllProgress,
+  BulkJobKind,
+  IBulkJob,
   INewRepositoryScan,
   IRedAlertRun,
   ICompareBranch,
@@ -413,6 +414,7 @@ import {
 } from './notifications-store'
 import * as ipcRenderer from '../ipc-renderer'
 import { pathExists } from '../path-exists'
+import { findRepositoryFolders } from '../find-repository-folders'
 import { offsetFromNow } from '../offset-from'
 import { findContributionTargetDefaultBranch } from '../branch'
 import { ValidNotificationPullRequestReview } from '../valid-notification-pull-request-review'
@@ -630,15 +632,45 @@ const normalizeCloneUrl = (url: string) =>
 /** Mutable bookkeeping behind INewRepositoryScanItem. */
 interface INewRepositoryScanEntry {
   readonly name: string
+  readonly path: string
   status: 'pending' | 'downloading' | 'done' | 'failed'
   cloning: CloningRepository | null
 }
 
 interface IRedAlertEntry {
   readonly name: string
+  readonly path: string
   status: IRedAlertRun['items'][number]['status']
   detail: string | null
 }
+
+/** Mutable bookkeeping behind IBulkJobItem. */
+interface IBulkJobEntry {
+  readonly name: string
+  readonly path: string
+  status: 'pending' | 'working' | 'done' | 'skipped' | 'failed'
+  detail: string | null
+  cloning: CloningRepository | null
+}
+
+/** Mutable bookkeeping behind IBulkJob. */
+interface IBulkJobRun {
+  readonly kind: BulkJobKind
+  phase: IBulkJob['phase']
+  items: Array<IBulkJobEntry>
+  readonly directory: string | null
+}
+
+const bulkEntry = (
+  path: string,
+  name = Path.basename(path)
+): IBulkJobEntry => ({
+  name,
+  path,
+  status: 'pending',
+  detail: null,
+  cloning: null,
+})
 
 /** First line of an error's message, for one-line status rows. */
 const errorSummary = (e: unknown) =>
@@ -780,8 +812,17 @@ export class AppStore extends TypedBaseStore<IAppState> {
   /** In-flight "Clone all repositories" batch; same join-don't-duplicate idea. */
   private cloneAllRepositoriesPromise: Promise<void> | null = null
 
-  /** Counters for the running clone-all batch, null when idle. */
-  private cloneAllProgress: ICloneAllProgress | null = null
+  /**
+   * What the progress screen shows for add / Clone all / Check all; null when
+   * hidden. Only one bulk job runs at a time; later ones wait in
+   * `bulkJobQueue`.
+   */
+  private bulkJob: IBulkJobRun | null = null
+  private bulkJobQueue: Promise<void> = Promise.resolve()
+  private bulkJobDismissTimer: number | null = null
+
+  /** The user sent the progress screen to the background. */
+  private isProgressScreenHidden = false
 
   /** In-flight startup "download new repositories" pass. */
   private newRepositoryScanPromise: Promise<void> | null = null
@@ -1424,8 +1465,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
       optOutOfUsageTracking: this.statsStore.getOptOut(),
       currentOnboardingTutorialStep: this.currentOnboardingTutorialStep,
       repositoryIndicatorsEnabled: this.repositoryIndicatorsEnabled,
-      isCheckingAllRepositories: this.checkAllRepositoriesPromise !== null,
-      cloneAllProgress: this.cloneAllProgress,
+      bulkJob: this.getBulkJobState(),
+      isProgressScreenHidden: this.isProgressScreenHidden,
       newRepositoryScan: this.getNewRepositoryScanState(),
       redAlert: this.getRedAlertState(),
       isRepositoryLibraryCollapsed: this.isRepositoryLibraryCollapsed,
@@ -4351,6 +4392,131 @@ export class AppStore extends TypedBaseStore<IAppState> {
     return gitStore
   }
 
+  private getBulkJobState(): IBulkJob | null {
+    const job = this.bulkJob
+    if (job === null) {
+      return null
+    }
+    return {
+      kind: job.kind,
+      phase: job.phase,
+      directory: job.directory,
+      items: job.items.map(item => ({
+        name: item.name,
+        path: item.path,
+        status: item.status,
+        detail: item.detail,
+        progress:
+          item.cloning !== null
+            ? this.cloningRepositoriesStore.getRepositoryState(item.cloning)
+                ?.value ?? 0
+            : null,
+      })),
+    }
+  }
+
+  /**
+   * Run a Kintsugi bulk job on the progress screen. One bulk job runs at a
+   * time: a job started while another runs waits for it, so two passes never
+   * race over the same GitStore instances.
+   */
+  private runBulkJob<T>(
+    kind: BulkJobKind,
+    directory: string | null,
+    work: (job: IBulkJobRun) => Promise<T>
+  ): Promise<T> {
+    const result = this.bulkJobQueue.then(async () => {
+      this.clearBulkJobDismissTimer()
+      const job: IBulkJobRun = {
+        kind,
+        phase: 'preparing',
+        items: [],
+        directory,
+      }
+      this.bulkJob = job
+      this.isProgressScreenHidden = false
+      this.emitUpdate()
+      try {
+        return await work(job)
+      } finally {
+        job.phase = 'done'
+        for (const item of job.items) {
+          // Only reachable when `work` threw part-way through.
+          if (item.status === 'pending' || item.status === 'working') {
+            item.status = 'failed'
+            item.detail = item.detail ?? 'Stopped by an error'
+          }
+          item.cloning = null
+        }
+        // Leave failures on screen until dismissed; clean runs fade away.
+        if (!job.items.some(i => i.status === 'failed')) {
+          this.scheduleBulkJobDismiss(job, kind === 'clone-all' ? 4000 : 1800)
+        }
+        this.emitUpdate()
+      }
+    })
+    this.bulkJobQueue = result.then(
+      () => undefined,
+      () => undefined
+    )
+    return result
+  }
+
+  private clearBulkJobDismissTimer() {
+    if (this.bulkJobDismissTimer !== null) {
+      window.clearTimeout(this.bulkJobDismissTimer)
+      this.bulkJobDismissTimer = null
+    }
+  }
+
+  private scheduleBulkJobDismiss(job: IBulkJobRun, delay: number) {
+    this.clearBulkJobDismissTimer()
+    this.bulkJobDismissTimer = window.setTimeout(() => {
+      this.bulkJobDismissTimer = null
+      if (this.bulkJob === job) {
+        this._dismissBulkJob()
+      }
+    }, delay)
+  }
+
+  /** This shouldn't be called directly. See `Dispatcher`. */
+  public _dismissBulkJob() {
+    if (this.bulkJob === null || this.bulkJob.phase !== 'done') {
+      return
+    }
+    this.clearBulkJobDismissTimer()
+    this.bulkJob = null
+    this.emitUpdate()
+  }
+
+  /**
+   * Send the progress screen to the background (or bring it back). It keeps
+   * running; the title bar shows it is busy.
+   *
+   * This shouldn't be called directly. See `Dispatcher`.
+   */
+  public _setProgressScreenHidden(hidden: boolean) {
+    this.isProgressScreenHidden = hidden
+    this.emitUpdate()
+  }
+
+  /** Work `items` with `count` concurrent workers. */
+  private async runWorkers<T>(
+    items: ReadonlyArray<T>,
+    count: number,
+    work: (item: T) => Promise<void>
+  ) {
+    const queue = [...items]
+    const worker = async () => {
+      for (let item = queue.shift(); item !== undefined; item = queue.shift()) {
+        await work(item)
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(count, queue.length) }, worker)
+    )
+  }
+
   /**
    * "Check all": rescan every repository's working directory right now
    * instead of waiting for the 15-minute RepositoryIndicatorUpdater tick.
@@ -4365,32 +4531,57 @@ export class AppStore extends TypedBaseStore<IAppState> {
       return this.checkAllRepositoriesPromise
     }
 
-    const run = async () => {
-      // Snapshot: the list can be mutated (add/remove) while we're scanning.
-      const queue = [...this.repositories]
-      // A handful of concurrent `git status` processes: fast on SSDs without
-      // spawning one git.exe per repo when someone has 200 repos.
-      const workerCount = Math.min(4, queue.length)
-      const worker = async () => {
-        for (let repo = queue.shift(); repo; repo = queue.shift()) {
+    this.checkAllRepositoriesPromise = this.runBulkJob(
+      'check-all',
+      null,
+      async job => {
+        // Snapshot: the list can be mutated (add/remove) while we're scanning.
+        const work = this.repositories.map(repository => ({
+          repository,
+          entry: bulkEntry(
+            repository.path,
+            repository.alias ?? repository.name
+          ),
+        }))
+        job.items = work.map(w => w.entry)
+        job.phase = 'running'
+        this.emitUpdate()
+
+        // A handful of concurrent `git status` processes: fast on SSDs
+        // without spawning one git.exe per repo when someone has 200 repos.
+        await this.runWorkers(work, 4, async ({ repository, entry }) => {
+          entry.status = 'working'
+          this.emitUpdate()
           try {
-            await this.refreshChangesIndicatorForRepository(repo)
+            const gitStore = await this.refreshChangesIndicatorForRepository(
+              repository
+            )
+            if (gitStore === null) {
+              entry.status = 'failed'
+              entry.detail = 'Folder is missing or not a repository'
+            } else {
+              const changed =
+                this.localRepositoryStateLookup.get(repository.id)
+                  ?.changedFilesCount ?? 0
+              entry.status = 'done'
+              entry.detail =
+                changed === 0
+                  ? 'Clean'
+                  : `${changed} changed ${changed === 1 ? 'file' : 'files'}`
+            }
           } catch (e) {
             // One broken repo (locked index, corrupt .git) must not abort
             // the whole pass.
-            log.warn(`[CheckAll] Failed to check ${repo.path}`, e)
+            log.warn(`[CheckAll] Failed to check ${repository.path}`, e)
+            entry.status = 'failed'
+            entry.detail = errorSummary(e)
           }
-        }
+          this.emitUpdate()
+        })
       }
-      await Promise.all(Array.from({ length: workerCount }, worker))
-    }
-
-    this.checkAllRepositoriesPromise = run().finally(() => {
+    ).finally(() => {
       this.checkAllRepositoriesPromise = null
-      this.emitUpdate()
     })
-    // Emit after assignment so getState() reports isCheckingAllRepositories.
-    this.emitUpdate()
     return this.checkAllRepositoriesPromise
   }
 
@@ -4410,90 +4601,165 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
     localStorage.setItem(cloneAllDirectoryKey, directory)
 
-    const run = async () => {
-      const { tracked, trackedPaths } = this.getTrackedCloneTargets()
-      const owned = await this.loadOwnedRepositories()
+    this.cloneAllRepositoriesPromise = this.runBulkJob(
+      'clone-all',
+      directory,
+      async job => {
+        const { tracked, trackedPaths } = this.getTrackedCloneTargets()
+        const owned = await this.loadOwnedRepositories()
 
-      let cloned = 0
-      let skipped = 0
-      let failed = 0
-      const setProgress = () => {
-        this.cloneAllProgress = { total: owned.size, cloned, skipped, failed }
+        // Resolve targets up front (sequentially) so two repos with the same
+        // name from different accounts can't race for the same folder.
+        const queue = new Array<{
+          repo: IAPIRepository
+          entry: IBulkJobEntry
+        }>()
+        const skipped = new Array<IBulkJobEntry>()
+        const plannedPaths = new Set<string>()
+        for (const [url, repo] of owned) {
+          let path = Path.join(directory, repo.name)
+          if (plannedPaths.has(path.toLowerCase())) {
+            path = Path.join(directory, `${repo.owner.login}-${repo.name}`)
+          }
+          const entry = bulkEntry(path, repo.name)
+
+          if (
+            tracked.has(url) ||
+            trackedPaths.has(Path.resolve(path).toLowerCase())
+          ) {
+            entry.status = 'skipped'
+            entry.detail = 'Already in Kintsugi'
+            skipped.push(entry)
+            continue
+          }
+          if (await pathExists(path)) {
+            entry.status = 'skipped'
+            entry.detail = 'Folder already exists'
+            skipped.push(entry)
+            continue
+          }
+
+          plannedPaths.add(path.toLowerCase())
+          queue.push({ repo, entry })
+        }
+        job.items = [...queue.map(q => q.entry), ...skipped]
+        job.phase = 'running'
         this.emitUpdate()
-      }
-      setProgress()
 
-      // Resolve targets up front (sequentially) so two repos with the same
-      // name from different accounts can't race for the same folder.
-      const queue = new Array<{ repo: IAPIRepository; path: string }>()
-      const plannedPaths = new Set<string>()
-      for (const [url, repo] of owned) {
-        let path = Path.join(directory, repo.name)
-        if (plannedPaths.has(path.toLowerCase())) {
-          path = Path.join(directory, `${repo.owner.login}-${repo.name}`)
-        }
-
-        if (
-          tracked.has(url) ||
-          trackedPaths.has(Path.resolve(path).toLowerCase()) ||
-          (await pathExists(path))
-        ) {
-          skipped++
-          continue
-        }
-
-        plannedPaths.add(path.toLowerCase())
-        queue.push({ repo, path })
-      }
-      setProgress()
-
-      // Two concurrent clones: network-bound, so more workers mostly just
-      // split the same bandwidth while multiplying credential prompts.
-      const worker = async () => {
-        for (let item = queue.shift(); item; item = queue.shift()) {
-          const { repo, path } = item
+        // Two concurrent clones: network-bound, so more workers mostly just
+        // split the same bandwidth while multiplying credential prompts.
+        await this.runWorkers(queue, 2, async ({ repo, entry }) => {
+          entry.status = 'working'
           try {
-            const { promise } = this._clone(repo.clone_url, path, {
-              defaultBranch: repo.default_branch,
-            })
+            const { promise, repository } = this._clone(
+              repo.clone_url,
+              entry.path,
+              { defaultBranch: repo.default_branch }
+            )
+            entry.cloning = repository
+            this.emitUpdate()
             // Failures are already surfaced by CloningRepositoriesStore
-            // (error dialog with a retry action), so we only count them.
+            // (error dialog with a retry action), so we only record them.
             const success = await promise
-            if (success && (await this._addRepositories([path])).length > 0) {
-              cloned++
+            entry.cloning = null
+            if (success && (await this._addRepositories([entry.path])).length) {
+              entry.status = 'done'
+              entry.detail = 'Cloned'
             } else {
-              failed++
+              entry.status = 'failed'
+              entry.detail = 'Clone failed'
             }
           } catch (e) {
             log.warn(`[CloneAll] Failed to clone ${repo.clone_url}`, e)
-            failed++
+            entry.cloning = null
+            entry.status = 'failed'
+            entry.detail = errorSummary(e)
           }
-          setProgress()
-        }
+          this.emitUpdate()
+        })
+
+        // Everything owned has now been offered once; the startup pass should
+        // only pick up repositories created after this batch.
+        this.rememberOwnedRepositories(owned.keys(), new Set())
       }
-      await Promise.all(
-        Array.from({ length: Math.min(2, queue.length) }, worker)
-      )
-
-      // Everything owned has now been offered once; the startup pass should
-      // only pick up repositories created after this batch.
-      this.rememberOwnedRepositories(owned.keys(), new Set())
-
-      this._setBanner({
-        type: BannerType.KintsugiCloneAllComplete,
-        cloned,
-        skipped,
-        failed,
-      })
-    }
-
-    this.cloneAllRepositoriesPromise = run().finally(() => {
+    ).finally(() => {
       this.cloneAllRepositoriesPromise = null
-      this.cloneAllProgress = null
-      this.emitUpdate()
     })
-    this.emitUpdate()
     return this.cloneAllRepositoriesPromise
+  }
+
+  /**
+   * Kintsugi "Locate existing sources" (and dropping folders on the window):
+   * add every Git repository among `paths` to Kintsugi on the progress
+   * screen. A path that isn't a repository itself is searched one level deep,
+   * so picking the folder that holds all your repositories adds all of them.
+   *
+   * Resolves to the repositories added (or already present), or null when
+   * nothing among `paths` was a repository; the screen is then removed so the
+   * caller can offer something else.
+   *
+   * This shouldn't be called directly. See `Dispatcher`.
+   */
+  public _locateRepositories(
+    paths: ReadonlyArray<string>
+  ): Promise<ReadonlyArray<Repository> | null> {
+    return this.runBulkJob('add', null, async job => {
+      const found = await findRepositoryFolders(paths)
+      if (found.length === 0) {
+        this.bulkJob = null
+        return null
+      }
+
+      job.items = found.map(path => bulkEntry(path))
+      job.phase = 'running'
+      this.emitUpdate()
+
+      const added = new Array<Repository>()
+      const lfsRepositories = new Array<Repository>()
+      await this.runWorkers(job.items, 3, async entry => {
+        const existing = matchExistingRepository(this.repositories, entry.path)
+        if (existing !== undefined) {
+          entry.status = 'skipped'
+          entry.detail = 'Already in Kintsugi'
+          added.push(existing)
+          this.emitUpdate()
+          return
+        }
+
+        entry.status = 'working'
+        entry.detail = 'Reading repository'
+        this.emitUpdate()
+        try {
+          const result = await this.addRepositoryAtPath(entry.path)
+          if (result === null) {
+            entry.status = 'failed'
+            entry.detail = 'Not a Git repository'
+          } else {
+            added.push(result.repository)
+            if (result.usingLFS) {
+              lfsRepositories.push(result.repository)
+            }
+            entry.status = 'done'
+            entry.detail = result.repository.gitHubRepository
+              ? `Added · ${result.repository.gitHubRepository.fullName}`
+              : 'Added'
+          }
+        } catch (e) {
+          log.warn(`[Locate] Failed to add ${entry.path}`, e)
+          entry.status = 'failed'
+          entry.detail = errorSummary(e)
+        }
+        this.emitUpdate()
+      })
+
+      if (lfsRepositories.length > 0) {
+        this._showPopup({
+          type: PopupType.InitializeLFS,
+          repositories: lfsRepositories,
+        })
+      }
+      return added
+    })
   }
 
   /** Clone URLs and folders of the repositories already in Kintsugi. */
@@ -4603,6 +4869,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
       directory: sync.directory,
       items: sync.items.map(item => ({
         name: item.name,
+        path: item.path,
         status: item.status,
         progress:
           item.status === 'done' || item.status === 'failed'
@@ -4714,6 +4981,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
         plannedPaths.add(path.toLowerCase())
         const entry: INewRepositoryScanEntry = {
           name: repo.name,
+          path,
           status: 'pending',
           cloning: null,
         }
@@ -4726,6 +4994,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
       } else {
         sync.items = queue.map(q => q.entry)
         sync.phase = 'downloading'
+        this.isProgressScreenHidden = false
         this.emitUpdate()
 
         // Same two-at-a-time limit as Clone all.
@@ -7192,6 +7461,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
         items: Array<IRedAlertEntry>
       } = { phase: 'scanning', items: [] }
       this.redAlert = state
+      this.isProgressScreenHidden = false
 
       // Find what needs committing, four `git status` at a time.
       const jobs = new Array<{
@@ -7216,6 +7486,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
           }
           const entry: IRedAlertEntry = {
             name: repo.alias ?? repo.name,
+            path: repo.path,
             status: 'pending',
             detail: null,
           }
@@ -9136,6 +9407,58 @@ export class AppStore extends TypedBaseStore<IAppState> {
     }
   }
 
+  /**
+   * Add the repository at `path` to the store. Resolves to null when `path`
+   * isn't a repository. An already-tracked repository is returned as is.
+   */
+  private async addRepositoryAtPath(
+    path: string
+  ): Promise<{ repository: Repository; usingLFS: boolean } | null> {
+    const repositoryType = await getRepositoryType(path).catch(e => {
+      log.error('Could not determine repository type', e)
+      return { kind: 'missing' } as RepositoryType
+    })
+
+    if (repositoryType.kind === 'unsafe') {
+      const repository = await this.repositoriesStore.addRepository(
+        path,
+        undefined,
+        { missing: true }
+      )
+      return { repository, usingLFS: false }
+    }
+
+    if (repositoryType.kind !== 'regular') {
+      return null
+    }
+
+    const validatedPath = repositoryType.topLevelWorkingDirectory
+    log.info(`[AppStore] adding repository at ${validatedPath} to store`)
+
+    // We don't have to worry about repositoryWithRefreshedGitHubRepository
+    // and isUsingLFS if the repo already exists in the app.
+    const existing = matchExistingRepository(this.repositories, validatedPath)
+    if (existing !== undefined) {
+      return { repository: existing, usingLFS: false }
+    }
+
+    const addedRepo = await this.repositoriesStore.addRepository(
+      validatedPath,
+      repositoryType.gitDir
+    )
+
+    // initialize the remotes for this new repository to ensure it can fetch
+    // it's GitHub-related details using the GitHub API (if applicable)
+    const gitStore = this.gitStoreCache.get(addedRepo)
+    await gitStore.loadRemotes()
+
+    const [repository, usingLFS] = await Promise.all([
+      this.repositoryWithRefreshedGitHubRepository(addedRepo),
+      this.isUsingLFS(addedRepo),
+    ])
+    return { repository, usingLFS }
+  }
+
   public async _addRepositories(
     paths: ReadonlyArray<string>
   ): Promise<ReadonlyArray<Repository>> {
@@ -9144,57 +9467,14 @@ export class AppStore extends TypedBaseStore<IAppState> {
     const invalidPaths = new Array<string>()
 
     for (const path of paths) {
-      const repositoryType = await getRepositoryType(path).catch(e => {
-        log.error('Could not determine repository type', e)
-        return { kind: 'missing' } as RepositoryType
-      })
-
-      if (repositoryType.kind === 'unsafe') {
-        const repository = await this.repositoriesStore.addRepository(
-          path,
-          undefined,
-          { missing: true }
-        )
-
-        addedRepositories.push(repository)
+      const result = await this.addRepositoryAtPath(path)
+      if (result === null) {
+        invalidPaths.push(path)
         continue
       }
-
-      if (repositoryType.kind === 'regular') {
-        const validatedPath = repositoryType.topLevelWorkingDirectory
-        log.info(`[AppStore] adding repository at ${validatedPath} to store`)
-
-        const repositories = this.repositories
-        const existing = matchExistingRepository(repositories, validatedPath)
-
-        // We don't have to worry about repositoryWithRefreshedGitHubRepository
-        // and isUsingLFS if the repo already exists in the app.
-        if (existing !== undefined) {
-          addedRepositories.push(existing)
-          continue
-        }
-
-        const addedRepo = await this.repositoriesStore.addRepository(
-          validatedPath,
-          repositoryType.gitDir
-        )
-
-        // initialize the remotes for this new repository to ensure it can fetch
-        // it's GitHub-related details using the GitHub API (if applicable)
-        const gitStore = this.gitStoreCache.get(addedRepo)
-        await gitStore.loadRemotes()
-
-        const [refreshedRepo, usingLFS] = await Promise.all([
-          this.repositoryWithRefreshedGitHubRepository(addedRepo),
-          this.isUsingLFS(addedRepo),
-        ])
-        addedRepositories.push(refreshedRepo)
-
-        if (usingLFS) {
-          lfsRepositories.push(refreshedRepo)
-        }
-      } else {
-        invalidPaths.push(path)
+      addedRepositories.push(result.repository)
+      if (result.usingLFS) {
+        lfsRepositories.push(result.repository)
       }
     }
 

@@ -737,6 +737,12 @@ app.on('ready', () => {
     async (_, options) => mainWindow?.showOpenDialog(options) ?? null
   )
 
+  /** Like show-open-dialog, but returns every selected path. */
+  ipcMain.handle(
+    'show-open-dialog-paths',
+    async (_, options) => mainWindow?.showOpenDialogPaths(options) ?? []
+  )
+
   /**
    * An event sent by the renderer asking obtain whether the window is focused
    */

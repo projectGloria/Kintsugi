@@ -355,16 +355,16 @@ export interface IAppState {
   readonly repositoryIndicatorsEnabled: boolean
 
   /**
-   * Whether a user-initiated "Check all" pass is currently scanning every
-   * repository's working directory to refresh the sidebar change indicators.
+   * The running (or just finished) Kintsugi bulk job: adding existing
+   * repositories, "Clone all" or "Check all". Null when there is none.
    */
-  readonly isCheckingAllRepositories: boolean
+  readonly bulkJob: IBulkJob | null
 
   /**
-   * Progress of a running Kintsugi "Clone all repositories" batch, or null
-   * when no batch is running.
+   * Whether the user sent the Kintsugi progress screen to the background.
+   * Reset whenever a new process starts.
    */
-  readonly cloneAllProgress: ICloneAllProgress | null
+  readonly isProgressScreenHidden: boolean
 
   /**
    * The startup "download new repositories" pass, shown as an overlay card.
@@ -1243,18 +1243,44 @@ export interface IPullRequestState {
   readonly mergeStatus: MergeTreeResult | null
 }
 
-/** Progress counters for a Kintsugi "Clone all repositories" batch. */
-export interface ICloneAllProgress {
-  /** Number of owned repositories considered (cloned + skipped + failed + pending). */
-  readonly total: number
-  readonly cloned: number
-  readonly skipped: number
-  readonly failed: number
+/** Which Kintsugi bulk job an `IBulkJob` is. */
+export type BulkJobKind = 'add' | 'clone-all' | 'check-all'
+
+/**
+ * One repository in a bulk job.
+ * pending: waiting for a worker.
+ * working: being added, cloned or checked right now.
+ * done / skipped / failed: finished; `detail` says more.
+ */
+export interface IBulkJobItem {
+  readonly name: string
+  /** Folder on disk (where it will be, for a clone that hasn't started). */
+  readonly path: string
+  readonly status: 'pending' | 'working' | 'done' | 'skipped' | 'failed'
+  readonly detail: string | null
+  /** 0 to 1 while a clone runs; null when the step has no measurable progress. */
+  readonly progress: number | null
+}
+
+/** State of a Kintsugi bulk job (add existing, Clone all, Check all). */
+export interface IBulkJob {
+  readonly kind: BulkJobKind
+  /**
+   * preparing: finding the repositories to work on.
+   * running: working through `items`.
+   * done: finished.
+   */
+  readonly phase: 'preparing' | 'running' | 'done'
+  readonly items: ReadonlyArray<IBulkJobItem>
+  /** Target folder for Clone all, null otherwise. */
+  readonly directory: string | null
 }
 
 /** One repository found by the startup new-repository pass. */
 export interface INewRepositoryScanItem {
   readonly name: string
+  /** Folder the repository is cloned into. */
+  readonly path: string
   readonly status: 'pending' | 'downloading' | 'done' | 'failed'
   /** Clone progress of this repository, 0 to 1. */
   readonly progress: number
@@ -1296,6 +1322,8 @@ export type RedAlertItemStatus =
 
 export interface IRedAlertItem {
   readonly name: string
+  /** The repository's working directory. */
+  readonly path: string
   readonly status: RedAlertItemStatus
   /** Commit summary when finished, the reason when skipped or failed. */
   readonly detail: string | null

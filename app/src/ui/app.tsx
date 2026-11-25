@@ -18,7 +18,6 @@ import { updateStore, UpdateStatus } from './lib/update-store'
 import { RetryAction } from '../models/retry-actions'
 import { FetchType } from '../models/fetch'
 import { shouldRenderApplicationMenu } from './lib/features'
-import { matchExistingRepository } from '../lib/repository-matching'
 import { getVersion, getName } from './lib/app-proxy'
 import {
   getOS,
@@ -58,8 +57,8 @@ import {
   RevertProgress,
 } from './toolbar'
 import { KintsugiMenu } from './window/kintsugi-menu'
-import { NewRepositoryCard } from './window/new-repository-card'
-import { RedAlertCard } from './window/red-alert-card'
+import { ProgressScreen } from './window/progress-screen'
+import { pickProgressScreen } from './window/progress-screen-model'
 import { RepositoryLibrary } from './repository-library'
 import { iconForRepository, OcticonSymbol } from './octicons'
 import * as octicons from './octicons/octicons.generated'
@@ -70,6 +69,7 @@ import {
   selectAllWindowContents,
   installWindowsCLI,
   uninstallWindowsCLI,
+  showOpenDialogPaths,
 } from './main-process-proxy'
 import { DiscardChanges } from './discard-changes'
 import { Welcome } from './welcome'
@@ -177,7 +177,6 @@ import { generateRepositoryListContextMenu } from './repositories-list/repositor
 import * as ipcRenderer from '../lib/ipc-renderer'
 import { DiscardChangesRetryDialog } from './discard-changes/discard-changes-retry-dialog'
 import { PullRequestReview } from './notifications/pull-request-review'
-import { getRepositoryType } from '../lib/git'
 import { SSHUserPassword } from './ssh/ssh-user-password'
 import { showContextualMenu } from '../lib/menu-item'
 import { UnreachableCommitsDialog } from './history/unreachable-commits-dialog'
@@ -479,6 +478,8 @@ export class App extends React.Component<IAppProps, IAppState> {
         return this.chooseRepository()
       case 'add-local-repository':
         return this.showAddLocalRepo()
+      case 'locate-existing-sources':
+        return this.locateExistingSources()
       case 'create-branch':
         return this.showCreateBranch()
       case 'show-branches':
@@ -1228,39 +1229,52 @@ export class App extends React.Component<IAppProps, IAppState> {
 
   private async handleDragAndDrop(fileList: FileList) {
     const paths = Array.from(fileList, webUtils.getPathForFile)
+    return this.addRepositoriesFrom(paths)
+  }
+
+  /**
+   * Kintsugi "Locate existing sources": pick one or more folders (a
+   * repository, or a folder holding repositories) and add them all.
+   */
+  private locateExistingSources = async () => {
+    const paths = await showOpenDialogPaths({
+      title: 'Locate existing sources',
+      buttonLabel: 'Add',
+      properties: ['openDirectory', 'multiSelections'],
+    })
+    return this.addRepositoriesFrom(paths)
+  }
+
+  /**
+   * Shared by dropping folders on the window and "Locate existing sources":
+   * add every repository found among `paths` on the progress screen, then
+   * select the first one.
+   */
+  private async addRepositoriesFrom(paths: ReadonlyArray<string>) {
+    if (paths.length === 0) {
+      return
+    }
     const { dispatcher } = this.props
+    const repositories = await dispatcher.locateRepositories(paths)
 
-    // If they're bulk adding repositories then just blindly try to add them.
-    // But if they just dragged one, use the dialog so that they can initialize
-    // it if needed.
-    if (paths.length > 1) {
-      const addedRepositories = await dispatcher.addRepositories(paths)
-
-      if (addedRepositories.length > 0) {
-        dispatcher.recordAddExistingRepository()
-        await dispatcher.selectRepository(addedRepositories[0])
-      }
-    } else if (paths.length === 1) {
-      // user may accidentally provide a folder within the repository
-      // this ensures we use the repository root, if it is actually a repository
-      // otherwise we consider it an untracked repository
-      const path = await getRepositoryType(paths[0])
-        .then(t =>
-          t.kind === 'regular' ? t.topLevelWorkingDirectory : paths[0]
-        )
-        .catch(e => {
-          log.error('Could not determine repository type', e)
-          return paths[0]
-        })
-
-      const { repositories } = this.state
-      const existingRepository = matchExistingRepository(repositories, path)
-
-      if (existingRepository) {
-        await dispatcher.selectRepository(existingRepository)
+    if (repositories === null) {
+      // No repository anywhere in there. One folder gets the Add dialog so it
+      // can be initialized as a new repository; several get an explanation.
+      if (paths.length === 1) {
+        await this.showPopup({ type: PopupType.AddRepository, path: paths[0] })
       } else {
-        await this.showPopup({ type: PopupType.AddRepository, path })
+        dispatcher.postError(
+          new Error(
+            'None of the selected folders is a Git repository or contains one.'
+          )
+        )
       }
+      return
+    }
+
+    if (repositories.length > 0) {
+      dispatcher.recordAddExistingRepository()
+      await dispatcher.selectRepository(repositories[0])
     }
   }
 
@@ -1476,13 +1490,12 @@ export class App extends React.Component<IAppProps, IAppState> {
           <KintsugiMenu
             dispatcher={this.props.dispatcher}
             hasAccounts={this.state.accounts.length > 0}
-            isCheckingAllRepositories={this.state.isCheckingAllRepositories}
-            cloneAllProgress={this.state.cloneAllProgress}
+            bulkJob={this.state.bulkJob}
+            newRepositoryScan={this.state.newRepositoryScan}
+            isProgressScreenHidden={this.state.isProgressScreenHidden}
+            redAlert={this.state.redAlert}
             dirtyCount={this.countDirtyRepositories()}
-            isRedAlertRunning={
-              this.state.redAlert !== null &&
-              this.state.redAlert.phase !== 'done'
-            }
+            onLocateExistingSources={this.locateExistingSources}
           />
         )}
       </TitleBar>
@@ -3368,40 +3381,42 @@ export class App extends React.Component<IAppProps, IAppState> {
           {this.renderRepository()}
           {this.renderRepositoryLibrary()}
         </div>
-        <div className="kintsugi-cards">
-          {this.renderRedAlertCard()}
-          {this.renderNewRepositoryCard()}
-        </div>
+        {this.renderProgressScreen()}
         {this.renderPopups()}
         {this.renderDragElement()}
       </div>
     )
   }
 
-  private onDismissRedAlertCard = () => {
-    this.props.dispatcher.dismissRedAlert()
+  private onHideProgressScreen = () => {
+    this.props.dispatcher.setProgressScreenHidden(true)
   }
 
-  private renderRedAlertCard() {
-    const run = this.state.redAlert
-    return run === null ? null : (
-      <RedAlertCard run={run} onDismiss={this.onDismissRedAlertCard} />
-    )
+  private onCloseProgressScreen = () => {
+    const { dispatcher } = this.props
+    const { redAlert, bulkJob, newRepositoryScan } = this.state
+    const model = pickProgressScreen({ redAlert, bulkJob, newRepositoryScan })
+    switch (model?.source) {
+      case 'red-alert':
+        return dispatcher.dismissRedAlert()
+      case 'bulk':
+        return dispatcher.dismissBulkJob()
+      case 'new-repositories':
+        return dispatcher.dismissNewRepositoryScan()
+    }
   }
 
-  private onDismissNewRepositoryCard = () => {
-    this.props.dispatcher.dismissNewRepositoryScan()
-  }
-
-  private renderNewRepositoryCard() {
-    const sync = this.state.newRepositoryScan
-    if (sync === null) {
+  private renderProgressScreen() {
+    const { redAlert, bulkJob, newRepositoryScan } = this.state
+    const model = pickProgressScreen({ redAlert, bulkJob, newRepositoryScan })
+    if (model === null || this.state.isProgressScreenHidden) {
       return null
     }
     return (
-      <NewRepositoryCard
-        sync={sync}
-        onDismiss={this.onDismissNewRepositoryCard}
+      <ProgressScreen
+        model={model}
+        onHide={this.onHideProgressScreen}
+        onClose={this.onCloseProgressScreen}
       />
     )
   }

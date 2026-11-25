@@ -248,7 +248,7 @@ const LibraryItem = React.memo(function LibraryItem(props: ILibraryItemProps) {
 
 const MonogramTones = 6
 
-function Monogram({ name }: { readonly name: string }) {
+export function Monogram({ name }: { readonly name: string }) {
   // Stable string hash -> tone, so a repo keeps its colour across sessions.
   let hash = 0
   for (let i = 0; i < name.length; i++) {

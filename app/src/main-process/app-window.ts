@@ -510,6 +510,11 @@ export class AppWindow {
     const { filePaths } = await dialog.showOpenDialog(this.window, options)
     return filePaths.length > 0 ? filePaths[0] : null
   }
+
+  public async showOpenDialogPaths(options: Electron.OpenDialogOptions) {
+    const { filePaths } = await dialog.showOpenDialog(this.window, options)
+    return filePaths
+  }
 }
 
 const trySetUpdaterGuid = async (url: string) => {

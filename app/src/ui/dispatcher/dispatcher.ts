@@ -2980,6 +2980,27 @@ export class Dispatcher {
     this.appStore._dismissRedAlert()
   }
 
+  /**
+   * Kintsugi "Locate existing sources": add every Git repository among
+   * `paths` (or directly inside them) on the progress screen. Resolves to
+   * null when none of them held a repository.
+   */
+  public locateRepositories(
+    paths: ReadonlyArray<string>
+  ): Promise<ReadonlyArray<Repository> | null> {
+    return this.appStore._locateRepositories(paths)
+  }
+
+  /** Close the finished add / Clone all / Check all progress screen. */
+  public dismissBulkJob() {
+    this.appStore._dismissBulkJob()
+  }
+
+  /** Send the progress screen to the background, or bring it back. */
+  public setProgressScreenHidden(hidden: boolean) {
+    this.appStore._setProgressScreenHidden(hidden)
+  }
+
   /** Collapse/expand the right-hand repository library. */
   public toggleRepositoryLibrary() {
     this.appStore._toggleRepositoryLibrary()
